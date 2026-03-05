@@ -1,9 +1,10 @@
-"""看板視圖：四欄看板（待辦/進行中/審核中/已完成）"""
+"""看板視圖：四欄看板（待辦/進行中/審核中/已完成）+ 拖拉支援"""
 
 import tkinter as tk
 import tkinter.ttk as ttk
 from constants import (STATUSES, STATUS_COLORS, PRIORITY_COLORS,
                        PRIORITY_BG, FONT_BODY_BOLD, FONT_SMALL, FONT_FAMILY)
+from ui.drag_manager import DragManager
 
 
 class KanbanView(ttk.Frame):
@@ -14,6 +15,7 @@ class KanbanView(ttk.Frame):
         self.on_task_delete = on_task_delete
 
         self.columns = {}
+        self.drag_mgr = DragManager(self)
         self._build_columns()
 
     def _build_columns(self):
@@ -40,9 +42,12 @@ class KanbanView(ttk.Frame):
 
     def _create_card(self, parent, task):
         bg = PRIORITY_BG.get(task.priority, '#FFFFFF')
+        hover_bg = '#E8F0FE'
 
         card = tk.Frame(parent, bg=bg, relief='groove', bd=1,
                         cursor='hand2', padx=8, pady=6)
+        card._normal_bg = bg
+        card._hover_bg = hover_bg
 
         # 優先級圓點 + 標題
         title_frame = tk.Frame(card, bg=bg)
@@ -65,26 +70,59 @@ class KanbanView(ttk.Frame):
                                  font=FONT_SMALL, fg='#6C757D', anchor='w')
             cat_label.pack(fill='x')
 
-        # 負責人 + 到期日
+        # 負責人 + 到期日 + 預估週數
         info_parts = []
         if task.assignee:
-            info_parts.append(f"\u8ca0\u8cac\u4eba: {task.assignee}")
+            info_parts.append(f"負責人: {task.assignee}")
         if task.due_date:
-            info_parts.append(f"\u5230\u671f: {task.due_date}")
+            info_parts.append(f"到期: {task.due_date}")
+        if task.estimated_weeks:
+            info_parts.append(f"{task.estimated_weeks}w")
         if info_parts:
             info_label = tk.Label(card, text="  |  ".join(info_parts), bg=bg,
                                   font=FONT_SMALL, fg='#888888', anchor='w')
             info_label.pack(fill='x')
 
-        # 綁定事件到卡片和所有子元件
-        self._bind_card_events(card, task)
+        # 懸停效果
+        self._bind_hover(card, task)
+        # 拖拉支援
+        self.drag_mgr.bind_card(card, task)
+        # 右鍵選單
+        self._bind_right_click(card, task)
+
         return card
 
-    def _bind_card_events(self, widget, task):
-        widget.bind('<Button-1>', lambda e: self.on_task_click(task.id))
+    def _bind_hover(self, widget, task):
+        """綁定滑鼠懸停高亮效果"""
+        def _enter(e):
+            bg = widget.master.master._normal_bg if hasattr(widget.master.master, '_normal_bg') else '#E8F0FE'
+            self._set_bg_recursive(widget.winfo_toplevel(), widget, '#E8F0FE')
+
+        def _leave(e):
+            orig_bg = PRIORITY_BG.get(task.priority, '#FFFFFF')
+            self._set_bg_recursive(widget.winfo_toplevel(), widget, orig_bg)
+
+        # 只在最外層 card 綁定
+        if hasattr(widget, '_normal_bg'):
+            widget.bind('<Enter>', _enter)
+            widget.bind('<Leave>', _leave)
+
+    def _set_bg_recursive(self, toplevel, widget, bg):
+        """遞迴設定背景色"""
+        try:
+            if isinstance(widget, tk.Canvas) and widget.winfo_width() <= 12:
+                return  # 跳過圓點 Canvas
+            widget.configure(bg=bg)
+        except tk.TclError:
+            pass
+        for child in widget.winfo_children():
+            self._set_bg_recursive(toplevel, child, bg)
+
+    def _bind_right_click(self, widget, task):
+        """遞迴綁定右鍵選單"""
         widget.bind('<Button-3>', lambda e: self._show_context_menu(e, task))
         for child in widget.winfo_children():
-            self._bind_card_events(child, task)
+            self._bind_right_click(child, task)
 
     def _show_context_menu(self, event, task):
         menu = tk.Menu(self, tearoff=0)

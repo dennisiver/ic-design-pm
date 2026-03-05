@@ -6,13 +6,15 @@ from constants import STATUSES, FONT_FAMILY
 
 
 COLUMNS = [
-    ('title',      '標題',   250),
-    ('status',     '狀態',    80),
-    ('priority',   '優先級',  70),
-    ('category',   '類別',   150),
-    ('assignee',   '負責人', 100),
-    ('due_date',   '到期日', 100),
-    ('created_at', '建立時間', 140),
+    ('title',           '標題',     250),
+    ('status',          '狀態',      80),
+    ('priority',        '優先級',    70),
+    ('category',        '類別',     150),
+    ('assignee',        '負責人',   100),
+    ('due_date',        '到期日',   100),
+    ('start_date',      '開始日期',  100),
+    ('estimated_weeks', '預估週數',   80),
+    ('created_at',      '建立時間', 140),
 ]
 
 
@@ -57,6 +59,7 @@ class ListView(ttk.Frame):
 
         for task in tasks:
             iid = str(task.id)
+            ew = str(task.estimated_weeks) if task.estimated_weeks else ''
             values = (
                 task.title,
                 task.status,
@@ -64,6 +67,8 @@ class ListView(ttk.Frame):
                 task.category,
                 task.assignee,
                 task.due_date or '',
+                task.start_date or '',
+                ew,
                 task.created_at,
             )
             self.tree.insert('', 'end', iid=iid, values=values)

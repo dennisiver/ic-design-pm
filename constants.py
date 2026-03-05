@@ -27,8 +27,8 @@ PRIORITY_BG = {
     '低':   '#F0F8FF',
 }
 
-# IC 設計工作類別
-IC_CATEGORIES = [
+# 預設類別建議（可手動輸入任何值）
+DEFAULT_CATEGORIES = [
     'RTL設計',
     '驗證(Verification)',
     '合成(Synthesis)',
@@ -37,6 +37,13 @@ IC_CATEGORIES = [
     '時序分析(STA)',
     '實體驗證(Physical Verification)',
     '其他',
+]
+
+# 圖表配色
+CHART_COLORS = [
+    '#4E79A7', '#F28E2B', '#E15759', '#76B7B2',
+    '#59A14F', '#EDC948', '#B07AA1', '#FF9DA7',
+    '#9C755F', '#BAB0AC',
 ]
 
 # 字體
@@ -49,6 +56,6 @@ FONT_TITLE = (FONT_FAMILY, 14, 'bold')
 
 # 應用程式資訊
 APP_NAME = 'IC設計專案管理工具'
-APP_VERSION = '1.0.0'
+APP_VERSION = '2.0.0'
 DB_FOLDER_NAME = 'ICDesignPM'
 DB_FILE_NAME = 'projects.db'

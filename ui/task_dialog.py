@@ -4,7 +4,7 @@ import tkinter as tk
 import tkinter.ttk as ttk
 from tkinter import messagebox
 import re
-from constants import (STATUSES, PRIORITIES, IC_CATEGORIES,
+from constants import (STATUSES, PRIORITIES, DEFAULT_CATEGORIES,
                        FONT_BODY, FONT_BODY_BOLD, FONT_HEADER, FONT_FAMILY)
 
 
@@ -16,15 +16,35 @@ class TaskDialog:
 
         self.win = tk.Toplevel(parent)
         self.win.title("編輯任務" if task else "新增任務")
-        self.win.geometry("520x620")
-        self.win.resizable(False, False)
+        self.win.geometry("560x780")
+        self.win.resizable(False, True)
         self.win.transient(parent)
         self.win.grab_set()
 
-        main_frame = ttk.Frame(self.win, padding=16)
-        main_frame.pack(fill='both', expand=True)
+        # 主捲動容器
+        outer = ttk.Frame(self.win)
+        outer.pack(fill='both', expand=True)
 
-        # 專案選擇
+        canvas = tk.Canvas(outer, highlightthickness=0)
+        vsb = ttk.Scrollbar(outer, orient='vertical', command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+        canvas.pack(side='left', fill='both', expand=True)
+        vsb.pack(side='right', fill='y')
+
+        main_frame = ttk.Frame(canvas, padding=16)
+        win_id = canvas.create_window((0, 0), window=main_frame, anchor='nw')
+        main_frame.bind('<Configure>',
+                        lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
+        canvas.bind('<Configure>',
+                    lambda e: canvas.itemconfigure(win_id, width=e.width))
+        canvas.bind('<Enter>',
+                    lambda e: canvas.bind_all('<MouseWheel>',
+                        lambda ev: canvas.yview_scroll(
+                            int(-1 * (ev.delta / 120)), 'units')))
+        canvas.bind('<Leave>',
+                    lambda e: canvas.unbind_all('<MouseWheel>'))
+
+        # ── 專案選擇 ──
         ttk.Label(main_frame, text="所屬專案:", font=FONT_BODY_BOLD).pack(anchor='w')
         self.project_var = tk.StringVar()
         projects = db.get_all_projects()
@@ -35,7 +55,6 @@ class TaskDialog:
                                           font=FONT_BODY)
         self.project_combo.pack(fill='x', pady=(0, 8))
 
-        # 設定預設專案
         if task:
             proj = db.get_project_by_id(task.project_id)
             if proj and proj.name in self.project_map:
@@ -48,26 +67,25 @@ class TaskDialog:
         if not self.project_var.get() and project_names:
             self.project_var.set(project_names[0])
 
-        # 標題
+        # ── 標題 ──
         ttk.Label(main_frame, text="標題: *", font=FONT_BODY_BOLD).pack(anchor='w')
         self.title_var = tk.StringVar(value=task.title if task else '')
         ttk.Entry(main_frame, textvariable=self.title_var,
                   font=FONT_BODY).pack(fill='x', pady=(0, 8))
 
-        # 描述
+        # ── 描述 ──
         ttk.Label(main_frame, text="描述:", font=FONT_BODY_BOLD).pack(anchor='w')
-        self.desc_text = tk.Text(main_frame, height=5, font=FONT_BODY, wrap='word')
+        self.desc_text = tk.Text(main_frame, height=4, font=FONT_BODY, wrap='word')
         self.desc_text.pack(fill='x', pady=(0, 8))
         if task and task.description:
             self.desc_text.insert('1.0', task.description)
 
-        # 中間欄位 - 兩欄排列
+        # ── 狀態 + 優先級 ──
         mid_frame = ttk.Frame(main_frame)
         mid_frame.pack(fill='x', pady=(0, 8))
         mid_frame.columnconfigure(0, weight=1)
         mid_frame.columnconfigure(1, weight=1)
 
-        # 狀態
         ttk.Label(mid_frame, text="狀態:", font=FONT_BODY_BOLD).grid(
             row=0, column=0, sticky='w')
         self.status_var = tk.StringVar(value=task.status if task else '待辦')
@@ -75,7 +93,6 @@ class TaskDialog:
                      values=STATUSES, state='readonly',
                      font=FONT_BODY).grid(row=1, column=0, sticky='ew', padx=(0, 8))
 
-        # 優先級
         ttk.Label(mid_frame, text="優先級:", font=FONT_BODY_BOLD).grid(
             row=0, column=1, sticky='w')
         self.priority_var = tk.StringVar(value=task.priority if task else '中')
@@ -83,7 +100,7 @@ class TaskDialog:
                      values=PRIORITIES, state='readonly',
                      font=FONT_BODY).grid(row=1, column=1, sticky='ew')
 
-        # 類別 + 負責人
+        # ── 類別 + 負責人 ──
         mid2 = ttk.Frame(main_frame)
         mid2.pack(fill='x', pady=(0, 8))
         mid2.columnconfigure(0, weight=1)
@@ -92,8 +109,11 @@ class TaskDialog:
         ttk.Label(mid2, text="類別:", font=FONT_BODY_BOLD).grid(
             row=0, column=0, sticky='w')
         self.category_var = tk.StringVar(value=task.category if task else '')
+        # 可編輯的類別下拉（含建議值，但可手動輸入）
+        db_cats = db.get_unique_categories()
+        all_cats = sorted(set(DEFAULT_CATEGORIES + db_cats))
         ttk.Combobox(mid2, textvariable=self.category_var,
-                     values=[''] + IC_CATEGORIES, state='readonly',
+                     values=[''] + all_cats,
                      font=FONT_BODY).grid(row=1, column=0, sticky='ew', padx=(0, 8))
 
         ttk.Label(mid2, text="負責人:", font=FONT_BODY_BOLD).grid(
@@ -104,22 +124,57 @@ class TaskDialog:
                      values=assignees, font=FONT_BODY).grid(
             row=1, column=1, sticky='ew')
 
-        # 到期日
-        ttk.Label(main_frame, text="到期日 (YYYY-MM-DD):", font=FONT_BODY_BOLD).pack(anchor='w')
-        self.due_var = tk.StringVar(value=task.due_date if task and task.due_date else '')
-        ttk.Entry(main_frame, textvariable=self.due_var,
-                  font=FONT_BODY).pack(fill='x', pady=(0, 8))
+        # ── 日期與週數 ──
+        date_frame = ttk.Frame(main_frame)
+        date_frame.pack(fill='x', pady=(0, 8))
+        date_frame.columnconfigure(0, weight=1)
+        date_frame.columnconfigure(1, weight=1)
+        date_frame.columnconfigure(2, weight=1)
 
-        # 標籤
-        ttk.Label(main_frame, text="標籤 (以逗號分隔):", font=FONT_BODY_BOLD).pack(anchor='w')
+        ttk.Label(date_frame, text="到期日:", font=FONT_BODY_BOLD).grid(
+            row=0, column=0, sticky='w')
+        self.due_var = tk.StringVar(
+            value=task.due_date if task and task.due_date else '')
+        ttk.Entry(date_frame, textvariable=self.due_var,
+                  font=FONT_BODY).grid(row=1, column=0, sticky='ew', padx=(0, 8))
+
+        ttk.Label(date_frame, text="開始日期:", font=FONT_BODY_BOLD).grid(
+            row=0, column=1, sticky='w')
+        self.start_var = tk.StringVar(
+            value=task.start_date if task and task.start_date else '')
+        ttk.Entry(date_frame, textvariable=self.start_var,
+                  font=FONT_BODY).grid(row=1, column=1, sticky='ew', padx=(0, 8))
+
+        ttk.Label(date_frame, text="預估週數:", font=FONT_BODY_BOLD).grid(
+            row=0, column=2, sticky='w')
+        self.weeks_var = tk.StringVar(
+            value=str(task.estimated_weeks) if task and task.estimated_weeks else '')
+        ttk.Entry(date_frame, textvariable=self.weeks_var,
+                  font=FONT_BODY).grid(row=1, column=2, sticky='ew')
+
+        # 日期格式提示
+        ttk.Label(main_frame, text="日期格式: YYYY-MM-DD",
+                  font=(FONT_FAMILY, 8), foreground='#999999').pack(anchor='w')
+
+        # ── 標籤 ──
+        ttk.Label(main_frame, text="標籤 (以逗號分隔):", font=FONT_BODY_BOLD).pack(
+            anchor='w', pady=(4, 0))
         self.tags_var = tk.StringVar(
             value=', '.join(task.tags) if task and task.tags else '')
         ttk.Entry(main_frame, textvariable=self.tags_var,
-                  font=FONT_BODY).pack(fill='x', pady=(0, 12))
+                  font=FONT_BODY).pack(fill='x', pady=(0, 8))
 
-        # 按鈕
+        # ── 工作日誌（僅編輯模式）──
+        if task:
+            sep = ttk.Separator(main_frame, orient='horizontal')
+            sep.pack(fill='x', pady=(4, 8))
+            from ui.work_log_panel import WorkLogPanel
+            self.work_log_panel = WorkLogPanel(main_frame, db, task.id)
+            self.work_log_panel.pack(fill='x', pady=(0, 8))
+
+        # ── 按鈕 ──
         btn_frame = ttk.Frame(main_frame)
-        btn_frame.pack(fill='x')
+        btn_frame.pack(fill='x', pady=(8, 0))
         ttk.Button(btn_frame, text="取消", command=self.win.destroy,
                    style='Toolbar.TButton').pack(side='right', padx=(8, 0))
         ttk.Button(btn_frame, text="儲存", command=self._save,
@@ -138,17 +193,39 @@ class TaskDialog:
             messagebox.showwarning("缺少必填欄位", "請選擇所屬專案", parent=self.win)
             return
 
+        # 驗證日期格式
         due_date = self.due_var.get().strip() or None
         if due_date and not re.match(r'^\d{4}-\d{2}-\d{2}$', due_date):
             messagebox.showwarning("格式錯誤", "到期日格式應為 YYYY-MM-DD",
                                    parent=self.win)
             return
 
+        start_date = self.start_var.get().strip() or None
+        if start_date and not re.match(r'^\d{4}-\d{2}-\d{2}$', start_date):
+            messagebox.showwarning("格式錯誤", "開始日期格式應為 YYYY-MM-DD",
+                                   parent=self.win)
+            return
+
+        # 驗證預估週數
+        weeks_str = self.weeks_var.get().strip()
+        estimated_weeks = None
+        if weeks_str:
+            try:
+                estimated_weeks = int(weeks_str)
+                if estimated_weeks < 0:
+                    messagebox.showwarning("格式錯誤", "預估週數不可為負數",
+                                           parent=self.win)
+                    return
+            except ValueError:
+                messagebox.showwarning("格式錯誤", "預估週數必須為整數",
+                                       parent=self.win)
+                return
+
         project_id = self.project_map[project_name]
         description = self.desc_text.get('1.0', 'end-1c').strip()
         status = self.status_var.get()
         priority = self.priority_var.get()
-        category = self.category_var.get()
+        category = self.category_var.get().strip()
         assignee = self.assignee_var.get().strip()
         tags_text = self.tags_var.get().strip()
         tags = [t.strip() for t in tags_text.split(',') if t.strip()] if tags_text else []
@@ -156,11 +233,11 @@ class TaskDialog:
         if self.task:
             self.db.update_task(
                 self.task.id, title, description, status, priority,
-                category, assignee, due_date, tags)
+                category, assignee, due_date, start_date, estimated_weeks, tags)
         else:
             self.db.create_task(
                 project_id, title, description, status, priority,
-                category, assignee, due_date, tags)
+                category, assignee, due_date, start_date, estimated_weeks, tags)
 
         self.result = True
         self.win.destroy()

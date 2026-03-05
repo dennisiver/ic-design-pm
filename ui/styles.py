@@ -32,6 +32,17 @@ def setup_styles(root):
                     font=(FONT_FAMILY, 10, 'bold'),
                     padding=(12, 5))
 
+    # Tab buttons (分頁)
+    style.configure('Tab.TButton',
+                    font=(FONT_FAMILY, 10),
+                    padding=(14, 5),
+                    relief='flat')
+
+    style.configure('ActiveTab.TButton',
+                    font=(FONT_FAMILY, 10, 'bold'),
+                    padding=(14, 5),
+                    relief='sunken')
+
     # Label styles
     style.configure('Header.TLabel',
                     font=(FONT_FAMILY, 12, 'bold'))
@@ -42,5 +53,12 @@ def setup_styles(root):
     style.configure('Status.TLabel',
                     font=(FONT_FAMILY, 9),
                     foreground='#555555')
+
+    # Dashboard styles
+    style.configure('DashCard.TFrame',
+                    relief='groove',
+                    borderwidth=1)
+    style.configure('BigNumber.TLabel',
+                    font=(FONT_FAMILY, 22, 'bold'))
 
     root.configure(bg='#F0F0F0')

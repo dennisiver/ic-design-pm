@@ -6,22 +6,41 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 EXPORT_COLUMNS = [
-    ('編號',     'id',          8),
-    ('標題',     'title',      35),
-    ('狀態',     'status',     12),
-    ('優先級',   'priority',   10),
-    ('類別',     'category',   25),
-    ('負責人',   'assignee',   15),
-    ('到期日',   'due_date',   14),
-    ('描述',     'description', 50),
-    ('建立時間', 'created_at', 20),
-    ('更新時間', 'updated_at', 20),
+    ('編號',       'id',              8),
+    ('專案',       'project_name',   20),
+    ('標題',       'title',          35),
+    ('狀態',       'status',         12),
+    ('優先級',     'priority',       10),
+    ('類別',       'category',       25),
+    ('負責人',     'assignee',       15),
+    ('到期日',     'due_date',       14),
+    ('開始日期',   'start_date',     14),
+    ('預估週數',   'estimated_weeks', 10),
+    ('標籤',       'tags',           20),
+    ('描述',       'description',    50),
+    ('建立時間',   'created_at',     20),
+    ('更新時間',   'updated_at',     20),
 ]
 
 FONT_NAME = 'Microsoft JhengHei UI'
 
 
-def export_tasks_to_excel(filepath, tasks, project_name="全部專案"):
+def export_tasks_to_excel(filepath, tasks, project_name="全部專案",
+                          project_lookup=None, task_tags_lookup=None):
+    """匯出任務至 Excel。
+
+    Args:
+        filepath: 匯出檔案路徑
+        tasks: Task 物件清單
+        project_name: 當前專案名稱（顯示於標題列）
+        project_lookup: {project_id: project_name} 對照表
+        task_tags_lookup: {task_id: [tag_name, ...]} 對照表
+    """
+    if project_lookup is None:
+        project_lookup = {}
+    if task_tags_lookup is None:
+        task_tags_lookup = {}
+
     wb = Workbook()
     ws = wb.active
     ws.title = "任務清單"
@@ -73,7 +92,15 @@ def export_tasks_to_excel(filepath, tasks, project_name="全部專案"):
     # 資料列 (第4列開始)
     for row_idx, task in enumerate(tasks, 4):
         for col_idx, (_, field, _) in enumerate(EXPORT_COLUMNS, 1):
-            value = getattr(task, field, '')
+            if field == 'project_name':
+                value = project_lookup.get(task.project_id, '')
+            elif field == 'tags':
+                value = ', '.join(task_tags_lookup.get(task.id, []))
+            elif field == 'estimated_weeks':
+                value = task.estimated_weeks if task.estimated_weeks else ''
+            else:
+                value = getattr(task, field, '')
+
             cell = ws.cell(row=row_idx, column=col_idx, value=value or '')
             cell.font = body_font
             cell.alignment = Alignment(

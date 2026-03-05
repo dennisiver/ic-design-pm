@@ -14,7 +14,7 @@ class ProjectDialog:
 
         self.win = tk.Toplevel(parent)
         self.win.title("編輯專案" if project else "新增專案")
-        self.win.geometry("400x250")
+        self.win.geometry("400x300")
         self.win.resizable(False, False)
         self.win.transient(parent)
         self.win.grab_set()
@@ -34,6 +34,12 @@ class ProjectDialog:
         self.desc_text.pack(fill='x', pady=(0, 12))
         if project and project.description:
             self.desc_text.insert('1.0', project.description)
+
+        # 里程碑管理（僅編輯模式）
+        if project:
+            ttk.Button(main_frame, text="📌 管理里程碑",
+                       command=self._manage_milestones,
+                       style='Toolbar.TButton').pack(anchor='w', pady=(0, 12))
 
         # 按鈕
         btn_frame = ttk.Frame(main_frame)
@@ -61,3 +67,7 @@ class ProjectDialog:
 
         self.result = True
         self.win.destroy()
+
+    def _manage_milestones(self):
+        from ui.milestone_dialog import MilestoneDialog
+        MilestoneDialog(self.win, self.db, self.project.id, self.project.name)
