@@ -6,6 +6,7 @@ from tkinter import messagebox
 import re
 from constants import (STATUSES, PRIORITIES, DEFAULT_CATEGORIES,
                        FONT_BODY, FONT_BODY_BOLD, FONT_HEADER, FONT_FAMILY)
+from ui.date_picker import DateEntry
 
 
 class TaskDialog:
@@ -16,7 +17,7 @@ class TaskDialog:
 
         self.win = tk.Toplevel(parent)
         self.win.title("編輯任務" if task else "新增任務")
-        self.win.geometry("560x780")
+        self.win.geometry("560x720")
         self.win.resizable(False, True)
         self.win.transient(parent)
         self.win.grab_set()
@@ -109,7 +110,6 @@ class TaskDialog:
         ttk.Label(mid2, text="類別:", font=FONT_BODY_BOLD).grid(
             row=0, column=0, sticky='w')
         self.category_var = tk.StringVar(value=task.category if task else '')
-        # 可編輯的類別下拉（含建議值，但可手動輸入）
         db_cats = db.get_unique_categories()
         all_cats = sorted(set(DEFAULT_CATEGORIES + db_cats))
         ttk.Combobox(mid2, textvariable=self.category_var,
@@ -124,7 +124,7 @@ class TaskDialog:
                      values=assignees, font=FONT_BODY).grid(
             row=1, column=1, sticky='ew')
 
-        # ── 日期與週數 ──
+        # ── 日期與週數（使用日曆選擇器）──
         date_frame = ttk.Frame(main_frame)
         date_frame.pack(fill='x', pady=(0, 8))
         date_frame.columnconfigure(0, weight=1)
@@ -135,26 +135,22 @@ class TaskDialog:
             row=0, column=0, sticky='w')
         self.due_var = tk.StringVar(
             value=task.due_date if task and task.due_date else '')
-        ttk.Entry(date_frame, textvariable=self.due_var,
-                  font=FONT_BODY).grid(row=1, column=0, sticky='ew', padx=(0, 8))
+        DateEntry(date_frame, textvariable=self.due_var).grid(
+            row=1, column=0, sticky='ew', padx=(0, 8))
 
         ttk.Label(date_frame, text="開始日期:", font=FONT_BODY_BOLD).grid(
             row=0, column=1, sticky='w')
         self.start_var = tk.StringVar(
             value=task.start_date if task and task.start_date else '')
-        ttk.Entry(date_frame, textvariable=self.start_var,
-                  font=FONT_BODY).grid(row=1, column=1, sticky='ew', padx=(0, 8))
+        DateEntry(date_frame, textvariable=self.start_var).grid(
+            row=1, column=1, sticky='ew', padx=(0, 8))
 
         ttk.Label(date_frame, text="預估週數:", font=FONT_BODY_BOLD).grid(
             row=0, column=2, sticky='w')
         self.weeks_var = tk.StringVar(
             value=str(task.estimated_weeks) if task and task.estimated_weeks else '')
         ttk.Entry(date_frame, textvariable=self.weeks_var,
-                  font=FONT_BODY).grid(row=1, column=2, sticky='ew')
-
-        # 日期格式提示
-        ttk.Label(main_frame, text="日期格式: YYYY-MM-DD",
-                  font=(FONT_FAMILY, 8), foreground='#999999').pack(anchor='w')
+                  font=FONT_BODY, width=6).grid(row=1, column=2, sticky='ew')
 
         # ── 標籤 ──
         ttk.Label(main_frame, text="標籤 (以逗號分隔):", font=FONT_BODY_BOLD).pack(
@@ -164,13 +160,15 @@ class TaskDialog:
         ttk.Entry(main_frame, textvariable=self.tags_var,
                   font=FONT_BODY).pack(fill='x', pady=(0, 8))
 
-        # ── 工作日誌（僅編輯模式）──
+        # ── 工作日誌按鈕（僅編輯模式）──
         if task:
             sep = ttk.Separator(main_frame, orient='horizontal')
             sep.pack(fill='x', pady=(4, 8))
-            from ui.work_log_panel import WorkLogPanel
-            self.work_log_panel = WorkLogPanel(main_frame, db, task.id)
-            self.work_log_panel.pack(fill='x', pady=(0, 8))
+            log_count = len(db.get_work_logs(task.id))
+            ttk.Button(main_frame,
+                       text=f"\U0001f4dd 工作日誌 ({log_count} 筆)",
+                       command=self._open_work_log,
+                       style='Toolbar.TButton').pack(anchor='w', pady=(0, 8))
 
         # ── 按鈕 ──
         btn_frame = ttk.Frame(main_frame)
@@ -181,6 +179,11 @@ class TaskDialog:
                    style='Accent.TButton').pack(side='right')
 
         self.win.wait_window()
+
+    def _open_work_log(self):
+        from ui.work_log_dialog import WorkLogDialog
+        WorkLogDialog(self.win, self.db, self.task.id,
+                      task_title=self.task.title)
 
     def _save(self):
         title = self.title_var.get().strip()

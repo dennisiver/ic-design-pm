@@ -215,7 +215,9 @@ class AppWindow:
         elif self.current_view == 'dashboard':
             stats = self.db.get_dashboard_stats(self.current_project_id)
             milestones = self.db.get_milestones(self.current_project_id)
-            self.dashboard_view.refresh(tasks, stats, milestones)
+            project_progress = self.db.get_project_progress()
+            self.dashboard_view.refresh(tasks, stats, milestones,
+                                        project_progress=project_progress)
 
         self._update_statusbar(len(tasks))
 
@@ -323,7 +325,8 @@ class AppWindow:
             from export import export_tasks_to_excel
             export_tasks_to_excel(filepath, tasks, project_name,
                                   project_lookup=project_lookup,
-                                  task_tags_lookup=task_tags)
+                                  task_tags_lookup=task_tags,
+                                  db=self.db)
             messagebox.showinfo("匯出成功",
                                 f"已匯出 {len(tasks)} 項任務至:\n{filepath}",
                                 parent=self.root)

@@ -1,4 +1,4 @@
-"""儀表板視圖：數字摘要 + Canvas 圖表 + 到期清單"""
+"""儀表板視圖：數字摘要 + Canvas 圖表 + 到期清單 + 各專案進度"""
 
 import tkinter as tk
 import tkinter.ttk as ttk
@@ -51,7 +51,7 @@ class DashboardView(ttk.Frame):
             self.summary_frame.columnconfigure(i, weight=1)
             self.summary_cards[key] = card
 
-        # ── Row 2: 圖表列 (狀態圓餅 + 優先級長條 + 負責人長條) ──
+        # ── Row 2: 圖表列 ──
         chart_row1 = ttk.Frame(self.inner)
         chart_row1.pack(fill='x', padx=12, pady=6)
 
@@ -79,7 +79,6 @@ class DashboardView(ttk.Frame):
                                           highlightbackground='#E0E0E0')
         self.category_canvas.pack(side='left', padx=6, pady=4, expand=True)
 
-        # 即將到期清單
         upcoming_frame = ttk.LabelFrame(chart_row2, text=" 即將到期 (7天內) ",
                                          padding=8)
         upcoming_frame.pack(side='left', fill='both', padx=6, pady=4, expand=True)
@@ -95,8 +94,12 @@ class DashboardView(ttk.Frame):
         self.upcoming_tree.column('status', width=70, minwidth=50)
         self.upcoming_tree.pack(fill='both', expand=True)
         self.upcoming_tree.bind('<Double-1>', self._on_upcoming_click)
-
         self.upcoming_map = {}
+
+        # ── Row 4: 各專案進度 ──
+        self.progress_frame = ttk.LabelFrame(self.inner,
+                                              text=" 各專案進度 ", padding=8)
+        self.progress_frame.pack(fill='x', padx=12, pady=(6, 12))
 
     def _on_canvas_resize(self, event):
         self.canvas.itemconfigure(self.canvas_window, width=event.width)
@@ -129,11 +132,11 @@ class DashboardView(ttk.Frame):
 
     # ─── 資料更新 ──────────────────────────────────────────
 
-    def refresh(self, tasks, stats=None, milestones=None):
+    def refresh(self, tasks, stats=None, milestones=None,
+                project_progress=None):
         today = date.today()
         week_later = today + timedelta(days=7)
 
-        # 計算摘要
         total = len(tasks)
         overdue = 0
         this_week = 0
@@ -196,6 +199,77 @@ class DashboardView(ttk.Frame):
 
         self.upcoming_tree.tag_configure('overdue', foreground='#DC3545')
         self.upcoming_tree.tag_configure('upcoming', foreground='#FD7E14')
+
+        # ── 各專案進度 ──
+        self._draw_project_progress(project_progress)
+
+    def _draw_project_progress(self, project_progress):
+        """繪製各專案進度條"""
+        # 清除舊內容
+        for w in self.progress_frame.winfo_children():
+            w.destroy()
+
+        if not project_progress:
+            tk.Label(self.progress_frame, text="無專案資料",
+                     font=(FONT_FAMILY, 9), fg='#999999').pack(anchor='w')
+            return
+
+        for i, pp in enumerate(project_progress):
+            name = pp['name']
+            total = pp['total']
+            done = pp['done']
+            in_prog = pp['in_progress']
+            pct = (done / total * 100) if total > 0 else 0
+
+            row = ttk.Frame(self.progress_frame)
+            row.pack(fill='x', pady=3)
+
+            # 專案名稱
+            tk.Label(row, text=name, font=(FONT_FAMILY, 9, 'bold'),
+                     width=16, anchor='w').pack(side='left')
+
+            # 進度條 Canvas
+            bar_canvas = tk.Canvas(row, height=20, bg='#EEEEEE',
+                                    highlightthickness=0)
+            bar_canvas.pack(side='left', fill='x', expand=True, padx=(4, 8))
+
+            # 繪製進度（延遲繪製讓 Canvas 知道寬度）
+            bar_canvas._data = (total, done, in_prog)
+            bar_canvas.bind('<Configure>',
+                            lambda e, c=bar_canvas: self._draw_progress_bar(c))
+
+            # 比例文字
+            tk.Label(row, text=f"{done}/{total}  ({pct:.0f}%)",
+                     font=(FONT_FAMILY, 9), fg='#555555',
+                     width=14, anchor='w').pack(side='left')
+
+    def _draw_progress_bar(self, canvas):
+        """繪製單個進度條"""
+        canvas.delete('all')
+        w = canvas.winfo_width()
+        h = canvas.winfo_height()
+        total, done, in_prog = canvas._data
+
+        if total == 0:
+            canvas.create_rectangle(0, 0, w, h, fill='#EEEEEE', outline='')
+            canvas.create_text(w // 2, h // 2, text='(無任務)',
+                               font=(FONT_FAMILY, 8), fill='#999999')
+            return
+
+        # 背景
+        canvas.create_rectangle(0, 0, w, h, fill='#EEEEEE', outline='')
+
+        # 已完成（綠）
+        done_w = int(w * done / total)
+        if done_w > 0:
+            canvas.create_rectangle(0, 0, done_w, h,
+                                     fill='#198754', outline='')
+
+        # 進行中（藍）
+        prog_w = int(w * in_prog / total)
+        if prog_w > 0:
+            canvas.create_rectangle(done_w, 0, done_w + prog_w, h,
+                                     fill='#0D6EFD', outline='')
 
     def _on_upcoming_click(self, event):
         item = self.upcoming_tree.identify_row(event.y)

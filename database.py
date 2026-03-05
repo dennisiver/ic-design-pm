@@ -383,3 +383,28 @@ class DatabaseManager:
             f"FROM tasks {where} GROUP BY c", params).fetchall()
         stats['by_category'] = [(r['c'], r['cnt']) for r in rows]
         return stats
+
+    def get_project_progress(self):
+        """回傳各專案的任務進度統計清單。
+        回傳: [{name, total, done, in_progress}, ...]
+        """
+        rows = self.conn.execute(
+            "SELECT p.id, p.name, "
+            "COUNT(t.id) as total, "
+            "SUM(CASE WHEN t.status='已完成' THEN 1 ELSE 0 END) as done, "
+            "SUM(CASE WHEN t.status='進行中' THEN 1 ELSE 0 END) as in_progress "
+            "FROM projects p "
+            "LEFT JOIN tasks t ON t.project_id = p.id "
+            "WHERE p.is_archived = 0 "
+            "GROUP BY p.id "
+            "ORDER BY p.name"
+        ).fetchall()
+        return [
+            {
+                'name': r['name'],
+                'total': r['total'] or 0,
+                'done': r['done'] or 0,
+                'in_progress': r['in_progress'] or 0,
+            }
+            for r in rows
+        ]

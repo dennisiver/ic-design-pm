@@ -5,6 +5,7 @@ import tkinter.ttk as ttk
 from tkinter import messagebox
 import re
 from constants import FONT_BODY, FONT_BODY_BOLD, FONT_HEADER
+from ui.date_picker import DateEntry
 
 
 class MilestoneDialog:
@@ -97,7 +98,7 @@ class _MilestoneEditDialog:
 
         self.win = tk.Toplevel(parent)
         self.win.title("編輯里程碑" if milestone else "新增里程碑")
-        self.win.geometry("360x220")
+        self.win.geometry("380x240")
         self.win.resizable(False, False)
         self.win.transient(parent)
         self.win.grab_set()
@@ -107,22 +108,26 @@ class _MilestoneEditDialog:
 
         ttk.Label(f, text="名稱:", font=FONT_BODY_BOLD).pack(anchor='w')
         self.name_var = tk.StringVar(value=milestone.name if milestone else '')
-        ttk.Entry(f, textvariable=self.name_var, font=FONT_BODY).pack(fill='x', pady=(0, 6))
+        ttk.Entry(f, textvariable=self.name_var, font=FONT_BODY).pack(
+            fill='x', pady=(0, 6))
 
-        ttk.Label(f, text="目標日期 (YYYY-MM-DD):", font=FONT_BODY_BOLD).pack(anchor='w')
+        ttk.Label(f, text="目標日期:", font=FONT_BODY_BOLD).pack(anchor='w')
         self.date_var = tk.StringVar(
             value=milestone.target_date if milestone else '')
-        ttk.Entry(f, textvariable=self.date_var, font=FONT_BODY).pack(fill='x', pady=(0, 6))
+        DateEntry(f, textvariable=self.date_var).pack(fill='x', pady=(0, 6))
 
         ttk.Label(f, text="說明:", font=FONT_BODY_BOLD).pack(anchor='w')
         self.desc_var = tk.StringVar(
             value=milestone.description if milestone else '')
-        ttk.Entry(f, textvariable=self.desc_var, font=FONT_BODY).pack(fill='x', pady=(0, 8))
+        ttk.Entry(f, textvariable=self.desc_var, font=FONT_BODY).pack(
+            fill='x', pady=(0, 8))
 
         bf = ttk.Frame(f)
         bf.pack(fill='x')
-        ttk.Button(bf, text="取消", command=self.win.destroy).pack(side='right', padx=(8, 0))
-        ttk.Button(bf, text="儲存", command=self._save).pack(side='right')
+        ttk.Button(bf, text="取消", command=self.win.destroy,
+                   style='Toolbar.TButton').pack(side='right', padx=(8, 0))
+        ttk.Button(bf, text="儲存", command=self._save,
+                   style='Accent.TButton').pack(side='right')
 
         self.win.wait_window()
 
@@ -133,7 +138,8 @@ class _MilestoneEditDialog:
             return
         d = self.date_var.get().strip()
         if not re.match(r'^\d{4}-\d{2}-\d{2}$', d):
-            messagebox.showwarning("格式錯誤", "日期格式應為 YYYY-MM-DD", parent=self.win)
+            messagebox.showwarning("格式錯誤", "日期格式應為 YYYY-MM-DD",
+                                    parent=self.win)
             return
         desc = self.desc_var.get().strip()
         if self.milestone:
