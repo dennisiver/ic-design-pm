@@ -1,19 +1,18 @@
 @echo off
-chcp 65001 >nul
 echo ========================================
-echo  IC設計專案管理工具 - 打包腳本
+echo  IC Design PM Tool - Build Script
 echo ========================================
 echo.
 
-echo [1/3] 安裝相依套件...
+echo [1/3] Installing dependencies...
 pip install openpyxl pyinstaller
 echo.
 
-echo [2/3] 執行 PyInstaller 打包...
-pyinstaller --onefile --windowed --name "IC設計專案管理" main.py
+echo [2/3] Running PyInstaller...
+pyinstaller --onefile --windowed --name "IC_Design_PM" main.py
 echo.
 
-echo [3/3] 打包完成！
-echo 執行檔位於: dist\IC設計專案管理.exe
+echo [3/3] Build complete!
+echo Output: dist\IC_Design_PM.exe
 echo.
 pause
