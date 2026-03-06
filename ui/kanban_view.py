@@ -1,10 +1,23 @@
-"""看板視圖：四欄看板（待辦/進行中/審核中/已完成）+ 拖拉支援"""
+"""看板視圖：OpenProject 風格四欄看板 + 拖拉支援"""
 
 import tkinter as tk
 import tkinter.ttk as ttk
 from constants import (STATUSES, STATUS_COLORS, PRIORITY_COLORS,
-                       PRIORITY_BG, FONT_BODY_BOLD, FONT_SMALL, FONT_FAMILY)
+                       CATEGORY_BADGE_COLORS, AVATAR_COLORS,
+                       FONT_BODY_BOLD, FONT_SMALL, FONT_FAMILY)
 from ui.drag_manager import DragManager
+
+# 快取負責人 → 顏色對應
+_assignee_color_cache = {}
+
+
+def _get_avatar_color(name):
+    if not name:
+        return '#AAAAAA'
+    if name not in _assignee_color_cache:
+        idx = len(_assignee_color_cache) % len(AVATAR_COLORS)
+        _assignee_color_cache[name] = AVATAR_COLORS[idx]
+    return _assignee_color_cache[name]
 
 
 class KanbanView(ttk.Frame):
@@ -40,86 +53,143 @@ class KanbanView(ttk.Frame):
                 card.pack(fill='x', padx=6, pady=3)
             col.update_scroll_region()
 
+    # ─── OpenProject 風格卡片 ─────────────────────────────
+
     def _create_card(self, parent, task):
-        bg = PRIORITY_BG.get(task.priority, '#FFFFFF')
-        hover_bg = '#E8F0FE'
-
-        card = tk.Frame(parent, bg=bg, relief='groove', bd=1,
-                        cursor='hand2', padx=8, pady=6)
-        card._normal_bg = bg
-        card._hover_bg = hover_bg
-
-        # 優先級圓點 + 標題
-        title_frame = tk.Frame(card, bg=bg)
-        title_frame.pack(fill='x')
-
+        card_bg = '#FFFFFF'
+        hover_bg = '#F0F4FF'
         priority_color = PRIORITY_COLORS.get(task.priority, '#6C757D')
-        dot = tk.Canvas(title_frame, width=10, height=10, bg=bg,
+
+        # 外層卡片：白底 + 左側優先級色條
+        card = tk.Frame(parent, bg=card_bg, cursor='hand2',
+                        highlightthickness=1, highlightbackground='#E0E0E0')
+        card._normal_bg = card_bg
+        card._hover_bg = hover_bg
+        card._skip_bg = set()  # 不需要遞迴變色的子元件
+
+        # 左側色條（模擬 border-left）
+        color_bar = tk.Frame(card, bg=priority_color, width=4)
+        color_bar.pack(side='left', fill='y')
+        card._skip_bg.add(id(color_bar))
+
+        # 右側內容
+        content = tk.Frame(card, bg=card_bg, padx=8, pady=6)
+        content.pack(side='left', fill='both', expand=True)
+
+        # Row 1：類別徽章
+        if task.category:
+            badge_frame = tk.Frame(content, bg=card_bg)
+            badge_frame.pack(fill='x', pady=(0, 4))
+            self._create_badge(badge_frame, task.category, card_bg)
+
+        # Row 2：標題
+        title_label = tk.Label(content, text=task.title, bg=card_bg,
+                               font=(FONT_FAMILY, 10, 'bold'), anchor='w',
+                               wraplength=190, justify='left', fg='#1A1A2E')
+        title_label.pack(fill='x')
+
+        # Row 3：到期日 + 預估週數
+        meta_parts = []
+        if task.due_date:
+            meta_parts.append(task.due_date)
+        if task.estimated_weeks:
+            meta_parts.append(f"{task.estimated_weeks}w")
+        if meta_parts:
+            meta_label = tk.Label(content, text="  \u00b7  ".join(meta_parts),
+                                  bg=card_bg, font=(FONT_FAMILY, 8),
+                                  fg='#888888', anchor='w')
+            meta_label.pack(fill='x', pady=(2, 0))
+
+        # Row 4：底部列（優先級點 + 負責人頭像）
+        bottom = tk.Frame(content, bg=card_bg)
+        bottom.pack(fill='x', pady=(6, 0))
+
+        # 優先級小圓點 + 文字
+        pri_frame = tk.Frame(bottom, bg=card_bg)
+        pri_frame.pack(side='left')
+        dot = tk.Canvas(pri_frame, width=10, height=10, bg=card_bg,
                         highlightthickness=0)
         dot.create_oval(1, 1, 9, 9, fill=priority_color, outline='')
-        dot.pack(side='left', padx=(0, 4), pady=2)
+        dot.pack(side='left', padx=(0, 3))
+        card._skip_bg.add(id(dot))
+        tk.Label(pri_frame, text=task.priority, bg=card_bg,
+                 font=(FONT_FAMILY, 8), fg=priority_color).pack(side='left')
 
-        title_label = tk.Label(title_frame, text=task.title, bg=bg,
-                               font=FONT_BODY_BOLD, anchor='w',
-                               wraplength=180, justify='left')
-        title_label.pack(side='left', fill='x', expand=True)
-
-        # 類別
-        if task.category:
-            cat_label = tk.Label(card, text=task.category, bg=bg,
-                                 font=FONT_SMALL, fg='#6C757D', anchor='w')
-            cat_label.pack(fill='x')
-
-        # 負責人 + 到期日 + 預估週數
-        info_parts = []
+        # 負責人頭像（圓圈+首字母）
         if task.assignee:
-            info_parts.append(f"負責人: {task.assignee}")
-        if task.due_date:
-            info_parts.append(f"到期: {task.due_date}")
-        if task.estimated_weeks:
-            info_parts.append(f"{task.estimated_weeks}w")
-        if info_parts:
-            info_label = tk.Label(card, text="  |  ".join(info_parts), bg=bg,
-                                  font=FONT_SMALL, fg='#888888', anchor='w')
-            info_label.pack(fill='x')
+            avatar = self._create_avatar(bottom, task.assignee, size=24)
+            avatar.pack(side='right')
+            card._skip_bg.add(id(avatar))
 
-        # 懸停效果
+        # 事件綁定
         self._bind_hover(card, task)
-        # 拖拉支援
         self.drag_mgr.bind_card(card, task)
-        # 右鍵選單
         self._bind_right_click(card, task)
 
         return card
 
+    def _create_badge(self, parent, category, parent_bg):
+        """建立類別徽章（小圓角標籤）"""
+        colors = CATEGORY_BADGE_COLORS.get(category, ('#555555', '#F0F0F0'))
+        fg, bg = colors
+
+        badge = tk.Label(parent, text=category, bg=bg, fg=fg,
+                         font=(FONT_FAMILY, 7, 'bold'),
+                         padx=6, pady=1, relief='flat',
+                         highlightthickness=1, highlightbackground=bg)
+        badge.pack(side='left')
+        # 記住徽章不要被 hover 改色
+        card = parent.master.master  # content -> card
+        if hasattr(card, '_skip_bg'):
+            card._skip_bg.add(id(badge))
+
+    def _create_avatar(self, parent, name, size=24):
+        """建立圓形頭像 Canvas（首字母）"""
+        color = _get_avatar_color(name)
+        c = tk.Canvas(parent, width=size, height=size,
+                      highlightthickness=0, bg=parent.cget('bg'))
+        c.create_oval(1, 1, size - 1, size - 1, fill=color, outline='')
+        initial = name[0].upper() if name else '?'
+        c.create_text(size // 2, size // 2, text=initial,
+                      font=(FONT_FAMILY, int(size * 0.4), 'bold'),
+                      fill='white')
+        return c
+
+    # ─── 懸停效果 ─────────────────────────────────────────
+
     def _bind_hover(self, widget, task):
-        """綁定滑鼠懸停高亮效果"""
+        if not hasattr(widget, '_normal_bg'):
+            return
+
         def _enter(e):
-            bg = widget.master.master._normal_bg if hasattr(widget.master.master, '_normal_bg') else '#E8F0FE'
-            self._set_bg_recursive(widget.winfo_toplevel(), widget, '#E8F0FE')
+            self._set_bg_recursive(widget, widget._hover_bg,
+                                   widget._skip_bg)
+            widget.configure(highlightbackground='#B0C4DE')
 
         def _leave(e):
-            orig_bg = PRIORITY_BG.get(task.priority, '#FFFFFF')
-            self._set_bg_recursive(widget.winfo_toplevel(), widget, orig_bg)
+            self._set_bg_recursive(widget, widget._normal_bg,
+                                   widget._skip_bg)
+            widget.configure(highlightbackground='#E0E0E0')
 
-        # 只在最外層 card 綁定
-        if hasattr(widget, '_normal_bg'):
-            widget.bind('<Enter>', _enter)
-            widget.bind('<Leave>', _leave)
+        widget.bind('<Enter>', _enter)
+        widget.bind('<Leave>', _leave)
 
-    def _set_bg_recursive(self, toplevel, widget, bg):
-        """遞迴設定背景色"""
+    def _set_bg_recursive(self, widget, bg, skip_ids=None):
+        skip = skip_ids or set()
+        if id(widget) in skip:
+            return
         try:
-            if isinstance(widget, tk.Canvas) and widget.winfo_width() <= 12:
-                return  # 跳過圓點 Canvas
+            if isinstance(widget, tk.Canvas) and widget.winfo_width() <= 14:
+                return
             widget.configure(bg=bg)
         except tk.TclError:
             pass
         for child in widget.winfo_children():
-            self._set_bg_recursive(toplevel, child, bg)
+            self._set_bg_recursive(child, bg, skip)
+
+    # ─── 右鍵選單 ────────────────────────────────────────
 
     def _bind_right_click(self, widget, task):
-        """遞迴綁定右鍵選單"""
         widget.bind('<Button-3>', lambda e: self._show_context_menu(e, task))
         for child in widget.winfo_children():
             self._bind_right_click(child, task)
@@ -146,21 +216,37 @@ class ScrollableColumn(ttk.Frame):
     def __init__(self, parent, status_name, accent_color):
         super().__init__(parent)
         self.status_name = status_name
+        self.accent_color = accent_color
 
-        # 標題
-        header_frame = ttk.Frame(self)
+        # 標題列
+        header_frame = tk.Frame(self, bg='#FAFAFA')
         header_frame.pack(fill='x')
 
-        self.header_label = ttk.Label(
-            header_frame,
-            text=f"{status_name} (0)",
-            font=(FONT_FAMILY, 11, 'bold')
-        )
-        self.header_label.pack(anchor='w', padx=8, pady=(8, 2))
+        # 色條（頂部）
+        accent = tk.Frame(header_frame, bg=accent_color, height=3)
+        accent.pack(fill='x')
 
-        # 色條
-        accent = tk.Frame(self, bg=accent_color, height=3)
-        accent.pack(fill='x', padx=4)
+        # 狀態名稱 + 數量氣泡
+        title_row = tk.Frame(header_frame, bg='#FAFAFA')
+        title_row.pack(fill='x', padx=8, pady=(6, 6))
+
+        self.header_label = tk.Label(
+            title_row, text=status_name,
+            font=(FONT_FAMILY, 11, 'bold'),
+            bg='#FAFAFA', fg='#333333'
+        )
+        self.header_label.pack(side='left')
+
+        self.count_label = tk.Label(
+            title_row, text='0',
+            font=(FONT_FAMILY, 9, 'bold'),
+            bg=accent_color, fg='white',
+            padx=6, pady=1
+        )
+        self.count_label.pack(side='left', padx=(6, 0))
+
+        # 分隔線
+        tk.Frame(self, bg='#E0E0E0', height=1).pack(fill='x')
 
         # 捲動區域
         container = ttk.Frame(self)
@@ -199,7 +285,7 @@ class ScrollableColumn(ttk.Frame):
         self.canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
 
     def set_count(self, count):
-        self.header_label.configure(text=f"{self.status_name} ({count})")
+        self.count_label.configure(text=str(count))
 
     def clear(self):
         for widget in self.inner_frame.winfo_children():

@@ -1,16 +1,24 @@
-"""甘特圖視圖：雙 Canvas 繪製（固定標籤 + 可捲動時間軸）+ Tooltip"""
+"""甘特圖視圖：OpenProject 風格 — 任務名稱顯示在條上 + 狀態色彩"""
 
 import tkinter as tk
 import tkinter.ttk as ttk
 from datetime import datetime, timedelta, date
 from constants import (CHART_COLORS, FONT_FAMILY, FONT_BODY, FONT_BODY_BOLD,
-                       STATUS_COLORS)
+                       STATUS_COLORS, PRIORITY_COLORS)
 
-ROW_HEIGHT = 32
-WEEK_WIDTH = 40
+ROW_HEIGHT = 34
+WEEK_WIDTH = 42
 HEADER_HEIGHT = 50
-LABEL_WIDTH = 180
+LABEL_WIDTH = 200
 MILESTONE_SIZE = 8
+
+# 狀態對應條色（OpenProject 風格）
+BAR_COLORS = {
+    '待辦':   '#90CAF9',   # 淺藍
+    '進行中': '#1565C0',   # 深藍
+    '審核中': '#FB8C00',   # 橘
+    '已完成': '#2E7D32',   # 綠
+}
 
 
 class _CanvasTooltip:
@@ -21,17 +29,18 @@ class _CanvasTooltip:
 
     def show(self, x, y, text):
         self.hide()
-        # 轉換為螢幕座標
         sx = self.canvas.winfo_rootx() + x
-        sy = self.canvas.winfo_rooty() + y - 30
+        sy = self.canvas.winfo_rooty() + y - 40
 
         self.tip_window = tw = tk.Toplevel(self.canvas)
         tw.wm_overrideredirect(True)
         tw.wm_geometry(f"+{sx}+{sy}")
 
-        label = tk.Label(tw, text=text, justify='left',
-                         background='#FFFFDD', relief='solid', borderwidth=1,
-                         font=(FONT_FAMILY, 9), padx=6, pady=3)
+        frame = tk.Frame(tw, bg='#333333', padx=1, pady=1)
+        frame.pack()
+        label = tk.Label(frame, text=text, justify='left',
+                         background='#333333', foreground='white',
+                         font=(FONT_FAMILY, 9), padx=8, pady=4)
         label.pack()
 
     def hide(self):
@@ -77,6 +86,9 @@ class GanttView(ttk.Frame):
         self.label_canvas = tk.Canvas(body, width=LABEL_WIDTH, bg='white',
                                        highlightthickness=0)
         self.label_canvas.pack(side='left', fill='y')
+
+        # 分隔線
+        tk.Frame(body, bg='#D0D0D0', width=1).pack(side='left', fill='y')
 
         # 右側時間軸 Canvas + 水平捲軸
         right = ttk.Frame(body)
@@ -142,9 +154,10 @@ class GanttView(ttk.Frame):
 
         color_idx = 0
         for group_name in sorted(groups.keys()):
-            self.rows.append((f"▸ {group_name}", None, '#E0E0E0'))
+            self.rows.append((f"\u25B8 {group_name}", None, '#E8E8E8'))
             color = CHART_COLORS[color_idx % len(CHART_COLORS)]
-            for t in groups[group_name]:
+            for t in sorted(groups[group_name],
+                            key=lambda x: x.start_date or ''):
                 self.rows.append((t.title, t, color))
             color_idx += 1
 
@@ -198,47 +211,77 @@ class GanttView(ttk.Frame):
         self.timeline_canvas.configure(scrollregion=(0, 0, canvas_w, canvas_h))
 
         # ── 時間軸標頭 ──
-        current = min_date
+        # 月份標頭（頂部）
+        current = min_date.replace(day=1)
         while current < max_date:
             x = self._date_to_x(current, min_date)
-            month_str = current.strftime('%Y/%m')
+            next_month = (current.replace(day=28) + timedelta(days=4)).replace(day=1)
+            x2 = self._date_to_x(next_month, min_date)
+            # 月份背景
+            self.timeline_canvas.create_rectangle(
+                x, 0, x2, 22, fill='#F5F5F5', outline='#E0E0E0')
+            month_str = current.strftime('%Y / %m')
             self.timeline_canvas.create_text(
-                x + 4, 10, text=month_str, anchor='nw',
-                font=(FONT_FAMILY, 8, 'bold'), fill='#333333')
-            if current.month == 12:
-                current = current.replace(year=current.year + 1, month=1, day=1)
-            else:
-                current = current.replace(month=current.month + 1, day=1)
+                (x + x2) // 2, 11, text=month_str,
+                font=(FONT_FAMILY, 8, 'bold'), fill='#555555')
+            current = next_month
 
+        # 週日期
         for w in range(total_weeks):
             x = w * WEEK_WIDTH
             week_date = min_date + timedelta(weeks=w)
             self.timeline_canvas.create_text(
-                x + 2, 28, text=week_date.strftime('%m/%d'), anchor='nw',
-                font=(FONT_FAMILY, 7), fill='#888888')
+                x + WEEK_WIDTH // 2, 36, text=week_date.strftime('%m/%d'),
+                font=(FONT_FAMILY, 7), fill='#999999')
             self.timeline_canvas.create_line(
-                x, HEADER_HEIGHT, x, canvas_h, fill='#E8E8E8', width=1)
+                x, HEADER_HEIGHT, x, canvas_h, fill='#F0F0F0', width=1)
 
         self.timeline_canvas.create_line(
-            0, HEADER_HEIGHT, canvas_w, HEADER_HEIGHT, fill='#CCCCCC')
+            0, HEADER_HEIGHT, canvas_w, HEADER_HEIGHT, fill='#D0D0D0')
+        self.label_canvas.create_rectangle(
+            0, 0, LABEL_WIDTH, HEADER_HEIGHT, fill='#F5F5F5', outline='')
+        self.label_canvas.create_text(
+            10, HEADER_HEIGHT // 2, text='任務', anchor='w',
+            font=(FONT_FAMILY, 9, 'bold'), fill='#555555')
         self.label_canvas.create_line(
-            0, HEADER_HEIGHT, LABEL_WIDTH, HEADER_HEIGHT, fill='#CCCCCC')
+            0, HEADER_HEIGHT, LABEL_WIDTH, HEADER_HEIGHT, fill='#D0D0D0')
 
         # ── 繪製列 ──
         for i, (label, task, color) in enumerate(self.rows):
             y = HEADER_HEIGHT + i * ROW_HEIGHT
-            bg = '#F0F0F0' if task is None else ('#FAFAFA' if i % 2 == 0 else '#FFFFFF')
+            is_group = task is None
+            bg = '#F0F0F0' if is_group else ('#FAFAFA' if i % 2 == 0 else '#FFFFFF')
 
             self.label_canvas.create_rectangle(
                 0, y, LABEL_WIDTH, y + ROW_HEIGHT, fill=bg, outline='')
             self.timeline_canvas.create_rectangle(
                 0, y, canvas_w, y + ROW_HEIGHT, fill=bg, outline='')
 
-            display = label[:14] + '...' if len(label) > 15 else label
-            font = (FONT_FAMILY, 9, 'bold') if task is None else (FONT_FAMILY, 9)
-            self.label_canvas.create_text(
-                8, y + ROW_HEIGHT // 2, text=display, anchor='w',
-                font=font, fill='#333333')
+            # 水平分隔線
+            self.label_canvas.create_line(
+                0, y + ROW_HEIGHT, LABEL_WIDTH, y + ROW_HEIGHT,
+                fill='#EEEEEE', width=1)
+            self.timeline_canvas.create_line(
+                0, y + ROW_HEIGHT, canvas_w, y + ROW_HEIGHT,
+                fill='#EEEEEE', width=1)
+
+            if is_group:
+                # 群組標題
+                self.label_canvas.create_text(
+                    10, y + ROW_HEIGHT // 2, text=label, anchor='w',
+                    font=(FONT_FAMILY, 10, 'bold'), fill='#333333')
+            else:
+                # 任務名稱（左側有狀態小色點）
+                status_color = STATUS_COLORS.get(task.status, '#999999')
+                self.label_canvas.create_oval(
+                    10, y + ROW_HEIGHT // 2 - 4,
+                    18, y + ROW_HEIGHT // 2 + 4,
+                    fill=status_color, outline='')
+
+                display = label[:18] + '..' if len(label) > 19 else label
+                self.label_canvas.create_text(
+                    24, y + ROW_HEIGHT // 2, text=display, anchor='w',
+                    font=(FONT_FAMILY, 9), fill='#333333')
 
             if task and task.start_date and task.estimated_weeks:
                 try:
@@ -247,34 +290,60 @@ class GanttView(ttk.Frame):
                     x1 = self._date_to_x(sd, min_date)
                     x2 = self._date_to_x(ed, min_date)
 
-                    bar_color = '#198754' if task.status == '已完成' else color
+                    bar_color = BAR_COLORS.get(task.status, color)
+
+                    # 圓角矩形效果（用兩個矩形+圓圈模擬）
+                    bar_y1 = y + 7
+                    bar_y2 = y + ROW_HEIGHT - 7
+                    bar_x2 = max(x1 + 8, x2)
 
                     bar_id = self.timeline_canvas.create_rectangle(
-                        x1, y + 6, max(x1 + 4, x2), y + ROW_HEIGHT - 6,
-                        fill=bar_color, outline='')
+                        x1, bar_y1, bar_x2, bar_y2,
+                        fill=bar_color, outline='', width=0)
 
-                    bar_w = x2 - x1
-                    if bar_w > 30:
+                    # 任務名稱顯示在條右側（OpenProject 風格）
+                    bar_w = bar_x2 - x1
+                    name_text = task.title
+                    if bar_w > 60:
+                        # 條夠寬：名稱放在條內
+                        max_chars = bar_w // 8
+                        disp = name_text[:max_chars]
+                        if len(name_text) > max_chars:
+                            disp = disp[:-2] + '..'
+                        name_id = self.timeline_canvas.create_text(
+                            x1 + 6, (bar_y1 + bar_y2) // 2,
+                            text=disp, anchor='w',
+                            font=(FONT_FAMILY, 8, 'bold'), fill='white')
+                        self._bind_bar_events(name_id, task.id,
+                                              self._bar_tip(task, ed))
+                    else:
+                        # 條太窄：名稱放在條右側
+                        disp = name_text[:16]
+                        if len(name_text) > 16:
+                            disp = disp[:-2] + '..'
                         self.timeline_canvas.create_text(
-                            (x1 + x2) // 2, y + ROW_HEIGHT // 2,
-                            text=f"{task.estimated_weeks}w",
-                            font=(FONT_FAMILY, 7, 'bold'), fill='white')
+                            bar_x2 + 4, (bar_y1 + bar_y2) // 2,
+                            text=disp, anchor='w',
+                            font=(FONT_FAMILY, 8), fill='#555555')
 
-                    # 任務 tooltip + 點擊
-                    tip_text = (f"{task.title}\n"
-                                f"{task.start_date} ~ {ed.isoformat()}\n"
-                                f"{task.estimated_weeks} 週 | {task.status}")
-                    self._bind_bar_events(bar_id, task.id, tip_text)
+                    self._bind_bar_events(bar_id, task.id,
+                                          self._bar_tip(task, ed))
                 except ValueError:
                     pass
 
-        # ── 里程碑 + tooltip ──
+        # ── 里程碑 ──
         for ms in self.milestones:
             try:
                 md = datetime.strptime(ms.target_date, '%Y-%m-%d').date()
                 mx = self._date_to_x(md, min_date)
-                my_top = HEADER_HEIGHT + 2
 
+                # 虛線（整個高度）
+                self.timeline_canvas.create_line(
+                    mx, HEADER_HEIGHT, mx, canvas_h,
+                    fill='#E15759', width=1, dash=(4, 4))
+
+                # 菱形圖示
+                my_top = HEADER_HEIGHT + 2
                 diamond = self.timeline_canvas.create_polygon(
                     mx, my_top,
                     mx + MILESTONE_SIZE, my_top + MILESTONE_SIZE,
@@ -282,20 +351,16 @@ class GanttView(ttk.Frame):
                     mx - MILESTONE_SIZE, my_top + MILESTONE_SIZE,
                     fill='#E15759', outline='#C0392B', width=1)
 
-                self.timeline_canvas.create_line(
-                    mx, HEADER_HEIGHT, mx, canvas_h,
-                    fill='#E15759', width=1, dash=(4, 4))
-
+                # 名稱標籤
                 name_id = self.timeline_canvas.create_text(
-                    mx + MILESTONE_SIZE + 2, my_top + MILESTONE_SIZE,
+                    mx + MILESTONE_SIZE + 4, my_top + MILESTONE_SIZE,
                     text=ms.name, anchor='w',
-                    font=(FONT_FAMILY, 7, 'bold'), fill='#E15759')
+                    font=(FONT_FAMILY, 8, 'bold'), fill='#C0392B')
 
-                # 里程碑 tooltip
-                tip_text = (f"{ms.name}\n"
-                            f"日期: {ms.target_date}\n"
-                            f"{ms.description}" if ms.description else
-                            f"{ms.name}\n日期: {ms.target_date}")
+                tip_text = (f"\u25C6 {ms.name}\n"
+                            f"日期: {ms.target_date}")
+                if ms.description:
+                    tip_text += f"\n{ms.description}"
 
                 self._bind_milestone_tooltip(diamond, tip_text)
                 self._bind_milestone_tooltip(name_id, tip_text)
@@ -307,17 +372,26 @@ class GanttView(ttk.Frame):
         self.timeline_canvas.create_line(
             today_x, 0, today_x, canvas_h,
             fill='#DC3545', width=2, dash=(6, 3))
+        # 「Today」標記
+        self.timeline_canvas.create_rectangle(
+            today_x - 22, 2, today_x + 22, 18,
+            fill='#DC3545', outline='')
         self.timeline_canvas.create_text(
-            today_x, 4, text='Today', anchor='n',
-            font=(FONT_FAMILY, 7, 'bold'), fill='#DC3545')
+            today_x, 10, text='Today',
+            font=(FONT_FAMILY, 7, 'bold'), fill='white')
+
+    def _bar_tip(self, task, end_date):
+        """產生任務條 tooltip 文字"""
+        lines = [task.title]
+        lines.append(f"{task.start_date} ~ {end_date.isoformat()}")
+        lines.append(f"{task.estimated_weeks} 週 | {task.status}")
+        if task.assignee:
+            lines.append(f"負責人: {task.assignee}")
+        return '\n'.join(lines)
 
     def _bind_bar_events(self, item_id, task_id, tip_text):
-        """綁定任務長條的點擊和 tooltip"""
         def _enter(e):
             self.timeline_canvas.configure(cursor='hand2')
-            # 取得 canvas 座標
-            cx = self.timeline_canvas.canvasx(e.x)
-            cy = self.timeline_canvas.canvasy(e.y)
             self.tooltip.show(e.x, e.y, tip_text)
 
         def _leave(e):
@@ -334,7 +408,6 @@ class GanttView(ttk.Frame):
         self.timeline_canvas.tag_bind(item_id, '<Button-1>', _click)
 
     def _bind_milestone_tooltip(self, item_id, tip_text):
-        """綁定里程碑的 hover tooltip"""
         def _enter(e):
             self.timeline_canvas.configure(cursor='hand2')
             self.tooltip.show(e.x, e.y, tip_text)

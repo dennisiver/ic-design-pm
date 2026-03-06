@@ -27,6 +27,24 @@ PRIORITY_BG = {
     '低':   '#F0F8FF',
 }
 
+# 類別徽章顏色 (fg, bg) — OpenProject 風格
+CATEGORY_BADGE_COLORS = {
+    'RTL設計':               ('#1A67A3', '#DBEAFE'),
+    '驗證(Verification)':    ('#6B21A8', '#EDE9FE'),
+    '合成(Synthesis)':       ('#0E7490', '#CFFAFE'),
+    '佈局繞線(Place&Route)': ('#92400E', '#FEF3C7'),
+    'DFT':                   ('#065F46', '#D1FAE5'),
+    '時序分析(STA)':         ('#9A3412', '#FFEDD5'),
+    '實體驗證(Physical Verification)': ('#5B21B6', '#EDE9FE'),
+    '其他':                  ('#555555', '#F0F0F0'),
+}
+
+# 頭像圓圈背景色（依序循環使用）
+AVATAR_COLORS = [
+    '#4E79A7', '#E15759', '#59A14F', '#F28E2B',
+    '#B07AA1', '#76B7B2', '#EDC948', '#FF9DA7',
+]
+
 # 預設類別建議（可手動輸入任何值）
 DEFAULT_CATEGORIES = [
     'RTL設計',
@@ -56,6 +74,6 @@ FONT_TITLE = (FONT_FAMILY, 14, 'bold')
 
 # 應用程式資訊
 APP_NAME = 'IC設計專案管理工具'
-APP_VERSION = '2.0.0'
+APP_VERSION = '2.2.0'
 DB_FOLDER_NAME = 'ICDesignPM'
 DB_FILE_NAME = 'projects.db'
