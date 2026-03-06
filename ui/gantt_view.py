@@ -331,7 +331,8 @@ class GanttView(ttk.Frame):
                 except ValueError:
                     pass
 
-        # ── 里程碑 ──
+        # ── 里程碑（顯示所有專案）──
+        ms_y_offset = 0  # 避免多個 milestone 重疊
         for ms in self.milestones:
             try:
                 md = datetime.strptime(ms.target_date, '%Y-%m-%d').date()
@@ -343,7 +344,7 @@ class GanttView(ttk.Frame):
                     fill='#E15759', width=1, dash=(4, 4))
 
                 # 菱形圖示
-                my_top = HEADER_HEIGHT + 2
+                my_top = HEADER_HEIGHT + 2 + ms_y_offset
                 diamond = self.timeline_canvas.create_polygon(
                     mx, my_top,
                     mx + MILESTONE_SIZE, my_top + MILESTONE_SIZE,
@@ -351,19 +352,35 @@ class GanttView(ttk.Frame):
                     mx - MILESTONE_SIZE, my_top + MILESTONE_SIZE,
                     fill='#E15759', outline='#C0392B', width=1)
 
-                # 名稱標籤
+                # 名稱標籤（含專案名稱）
+                proj_name = self.project_lookup.get(ms.project_id, '')
+                display_name = f"{ms.name}"
+                if proj_name:
+                    display_name = f"[{proj_name}] {ms.name}"
                 name_id = self.timeline_canvas.create_text(
                     mx + MILESTONE_SIZE + 4, my_top + MILESTONE_SIZE,
-                    text=ms.name, anchor='w',
+                    text=display_name, anchor='w',
                     font=(FONT_FAMILY, 8, 'bold'), fill='#C0392B')
 
+                # 計算距今天數
+                days_diff = (md - today).days
+                if days_diff > 0:
+                    days_str = f"還剩 {days_diff} 天"
+                elif days_diff == 0:
+                    days_str = "就是今天！"
+                else:
+                    days_str = f"已過 {abs(days_diff)} 天"
+
                 tip_text = (f"\u25C6 {ms.name}\n"
-                            f"日期: {ms.target_date}")
+                            f"日期: {ms.target_date}  ({days_str})")
+                if proj_name:
+                    tip_text += f"\n專案: {proj_name}"
                 if ms.description:
                     tip_text += f"\n{ms.description}"
 
                 self._bind_milestone_tooltip(diamond, tip_text)
                 self._bind_milestone_tooltip(name_id, tip_text)
+                ms_y_offset += 18  # 下一個 milestone 稍微下移
             except ValueError:
                 pass
 

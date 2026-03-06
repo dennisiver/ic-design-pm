@@ -106,7 +106,23 @@ class DashboardView(ttk.Frame):
         self.upcoming_tree.bind('<Double-1>', self._on_upcoming_click)
         self.upcoming_map = {}
 
-        # ── Row 4: 各專案進度 ──
+        # ── Row 4: 里程碑倒數 ──
+        milestone_outer = tk.Frame(self.inner, bg='white',
+                                    highlightthickness=1,
+                                    highlightbackground='#E0E0E0')
+        milestone_outer.pack(fill='x', padx=16, pady=(6, 6))
+
+        tk.Label(milestone_outer, text='\U0001F4CC 里程碑倒數',
+                 bg='white', fg='#333333',
+                 font=(FONT_FAMILY, 10, 'bold'),
+                 anchor='w', padx=8, pady=6).pack(fill='x')
+        tk.Frame(milestone_outer, bg='#E0E0E0', height=1).pack(fill='x')
+
+        self.milestone_frame = tk.Frame(milestone_outer, bg='white', padx=8,
+                                         pady=8)
+        self.milestone_frame.pack(fill='x')
+
+        # ── Row 5: 各專案進度 ──
         progress_outer = tk.Frame(self.inner, bg='white',
                                    highlightthickness=1,
                                    highlightbackground='#E0E0E0')
@@ -165,7 +181,7 @@ class DashboardView(ttk.Frame):
     # ─── 資料更新 ──────────────────────────────────────────
 
     def refresh(self, tasks, stats=None, milestones=None,
-                project_progress=None):
+                project_progress=None, project_lookup=None):
         today = date.today()
         week_later = today + timedelta(days=7)
 
@@ -233,8 +249,85 @@ class DashboardView(ttk.Frame):
         self.upcoming_tree.tag_configure('overdue', foreground='#C62828')
         self.upcoming_tree.tag_configure('upcoming', foreground='#E65100')
 
+        # 里程碑倒數
+        self._draw_milestone_countdown(milestones, project_lookup or {})
+
         # 各專案進度
         self._draw_project_progress(project_progress)
+
+    def _draw_milestone_countdown(self, milestones, project_lookup):
+        """繪製里程碑倒數區塊"""
+        for w in self.milestone_frame.winfo_children():
+            w.destroy()
+
+        if not milestones:
+            tk.Label(self.milestone_frame, text="無里程碑資料", bg='white',
+                     font=(FONT_FAMILY, 9), fg='#999999').pack(anchor='w')
+            return
+
+        today = date.today()
+        # 只顯示未來（含今天）的里程碑，按日期排序
+        future_ms = []
+        past_ms = []
+        for ms in milestones:
+            try:
+                md = datetime.strptime(ms.target_date, '%Y-%m-%d').date()
+                days_left = (md - today).days
+                proj_name = project_lookup.get(ms.project_id, '')
+                if days_left >= 0:
+                    future_ms.append((days_left, md, ms, proj_name))
+                else:
+                    past_ms.append((days_left, md, ms, proj_name))
+            except ValueError:
+                pass
+
+        future_ms.sort(key=lambda x: x[0])
+        past_ms.sort(key=lambda x: x[0], reverse=True)
+
+        # 最近的里程碑放最前
+        all_items = future_ms + past_ms[:3]  # 最多顯示3個已過期的
+
+        for days_left, md, ms, proj_name in all_items:
+            row = tk.Frame(self.milestone_frame, bg='white')
+            row.pack(fill='x', pady=3)
+
+            # 菱形圖示
+            diamond_canvas = tk.Canvas(row, width=16, height=16,
+                                        bg='white', highlightthickness=0)
+            if days_left > 7:
+                color = '#2E7D32'  # 綠：超過一週
+            elif days_left > 0:
+                color = '#E65100'  # 橘：一週內
+            elif days_left == 0:
+                color = '#C62828'  # 紅：今天
+            else:
+                color = '#999999'  # 灰：已過
+            diamond_canvas.create_polygon(8, 1, 15, 8, 8, 15, 1, 8,
+                                           fill=color, outline='')
+            diamond_canvas.pack(side='left', padx=(0, 6))
+
+            # 專案名 + 里程碑名稱
+            name_text = ms.name
+            if proj_name:
+                name_text = f"[{proj_name}] {ms.name}"
+            tk.Label(row, text=name_text, bg='white',
+                     font=(FONT_FAMILY, 9, 'bold'),
+                     anchor='w').pack(side='left')
+
+            # 日期 + 倒數
+            if days_left > 0:
+                countdown_text = f"{ms.target_date}  (還剩 {days_left} 天)"
+                fg = '#1565C0'
+            elif days_left == 0:
+                countdown_text = f"{ms.target_date}  (今天！)"
+                fg = '#C62828'
+            else:
+                countdown_text = f"{ms.target_date}  (已過 {abs(days_left)} 天)"
+                fg = '#999999'
+
+            tk.Label(row, text=countdown_text, bg='white',
+                     font=(FONT_FAMILY, 9), fg=fg,
+                     anchor='e').pack(side='right')
 
     def _draw_project_progress(self, project_progress):
         for w in self.progress_frame.winfo_children():

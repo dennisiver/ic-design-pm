@@ -4,6 +4,7 @@ import tkinter as tk
 import tkinter.ttk as ttk
 from tkinter import messagebox
 import re
+import os
 from constants import (STATUSES, PRIORITIES, DEFAULT_CATEGORIES,
                        FONT_BODY, FONT_BODY_BOLD, FONT_HEADER, FONT_FAMILY)
 from ui.date_picker import DateEntry
@@ -74,12 +75,16 @@ class TaskDialog:
         ttk.Entry(main_frame, textvariable=self.title_var,
                   font=FONT_BODY).pack(fill='x', pady=(0, 8))
 
-        # ── 描述 ──
-        ttk.Label(main_frame, text="描述:", font=FONT_BODY_BOLD).pack(anchor='w')
+        # ── 描述（支援超連結）──
+        ttk.Label(main_frame, text="描述 (支援檔案路徑連結):",
+                  font=FONT_BODY_BOLD).pack(anchor='w')
         self.desc_text = tk.Text(main_frame, height=4, font=FONT_BODY, wrap='word')
         self.desc_text.pack(fill='x', pady=(0, 8))
         if task and task.description:
             self.desc_text.insert('1.0', task.description)
+            self._highlight_links(self.desc_text)
+        self.desc_text.bind('<KeyRelease>',
+                            lambda e: self._highlight_links(self.desc_text))
 
         # ── 狀態 + 優先級 ──
         mid_frame = ttk.Frame(main_frame)
@@ -184,6 +189,51 @@ class TaskDialog:
         from ui.work_log_dialog import WorkLogDialog
         WorkLogDialog(self.win, self.db, self.task.id,
                       task_title=self.task.title)
+
+    def _highlight_links(self, text_widget):
+        """在 Text widget 中高亮檔案路徑和 URL"""
+        # 先移除舊 tag
+        for tag in text_widget.tag_names():
+            if tag.startswith('link_'):
+                text_widget.tag_remove(tag, '1.0', 'end')
+                text_widget.tag_delete(tag)
+
+        content = text_widget.get('1.0', 'end-1c')
+        link_pattern = re.compile(
+            r'(file:///[^\s]+|https?://[^\s]+|[A-Za-z]:\\[^\s,]+|\\\\[^\s,]+)')
+
+        for match in link_pattern.finditer(content):
+            # 計算 tkinter text index
+            start_idx = f'1.0+{match.start()}c'
+            end_idx = f'1.0+{match.end()}c'
+            tag_name = f'link_{match.start()}'
+            text_widget.tag_add(tag_name, start_idx, end_idx)
+            text_widget.tag_configure(tag_name, foreground='#1565C0',
+                                       underline=True)
+            link = match.group(0)
+            text_widget.tag_bind(tag_name, '<Button-1>',
+                                  lambda e, p=link: self._open_link(p))
+            text_widget.tag_bind(tag_name, '<Enter>',
+                                  lambda e: text_widget.configure(
+                                      cursor='hand2'))
+            text_widget.tag_bind(tag_name, '<Leave>',
+                                  lambda e: text_widget.configure(
+                                      cursor='xterm'))
+
+    def _open_link(self, path):
+        """開啟本機檔案或 URL"""
+        try:
+            if path.startswith('http://') or path.startswith('https://'):
+                import webbrowser
+                webbrowser.open(path)
+            elif path.startswith('file:///'):
+                real_path = path.replace('file:///', '')
+                os.startfile(real_path)
+            else:
+                os.startfile(path)
+        except Exception as e:
+            messagebox.showerror("無法開啟", f"無法開啟：\n{path}\n\n{e}",
+                                 parent=self.win)
 
     def _save(self):
         title = self.title_var.get().strip()

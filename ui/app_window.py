@@ -207,17 +207,27 @@ class AppWindow:
         elif self.current_view == 'list':
             self.list_view.refresh(tasks)
         elif self.current_view == 'gantt':
-            # 甘特圖需要里程碑和專案對照
-            milestones = self.db.get_milestones(self.current_project_id)
+            # 甘特圖需要里程碑和專案對照 — 顯示所有專案的 Milestone
+            if self.current_project_id:
+                milestones = self.db.get_milestones(self.current_project_id)
+            else:
+                milestones = self.db.get_milestones()  # 全部
             projects = self.db.get_all_projects()
             project_lookup = {p.id: p.name for p in projects}
             self.gantt_view.refresh(tasks, milestones, project_lookup)
         elif self.current_view == 'dashboard':
             stats = self.db.get_dashboard_stats(self.current_project_id)
-            milestones = self.db.get_milestones(self.current_project_id)
+            # 儀表板也需要所有里程碑
+            if self.current_project_id:
+                milestones = self.db.get_milestones(self.current_project_id)
+            else:
+                milestones = self.db.get_milestones()
             project_progress = self.db.get_project_progress()
+            projects = self.db.get_all_projects()
+            project_lookup = {p.id: p.name for p in projects}
             self.dashboard_view.refresh(tasks, stats, milestones,
-                                        project_progress=project_progress)
+                                        project_progress=project_progress,
+                                        project_lookup=project_lookup)
 
         self._update_statusbar(len(tasks))
 

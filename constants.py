@@ -74,6 +74,6 @@ FONT_TITLE = (FONT_FAMILY, 14, 'bold')
 
 # 應用程式資訊
 APP_NAME = 'IC設計專案管理工具'
-APP_VERSION = '2.2.0'
+APP_VERSION = '2.3.0'
 DB_FOLDER_NAME = 'ICDesignPM'
 DB_FILE_NAME = 'projects.db'

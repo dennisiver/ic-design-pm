@@ -1,4 +1,4 @@
-"""Excel 匯出功能（含工作日誌、依負責人分頁）"""
+"""Excel 匯出功能（任務清單 + 依負責人工作日誌分頁）"""
 
 from datetime import datetime
 from openpyxl import Workbook
@@ -26,7 +26,7 @@ WORKLOG_COLUMNS = [
     ('任務標題', 'task_title', 30),
     ('負責人',   'assignee',   15),
     ('日期',     'log_date',   14),
-    ('工時',     'hours',      10),
+    ('工時(天)', 'hours',      10),
     ('內容',     'content',    50),
 ]
 
@@ -38,13 +38,9 @@ def export_tasks_to_excel(filepath, tasks, project_name="全部專案",
                           db=None):
     """匯出任務至 Excel。
 
-    Args:
-        filepath: 匯出檔案路徑
-        tasks: Task 物件清單
-        project_name: 當前專案名稱（顯示於標題列）
-        project_lookup: {project_id: project_name} 對照表
-        task_tags_lookup: {task_id: [tag_name, ...]} 對照表
-        db: DatabaseManager（用於匯出工作日誌）
+    結構：
+        Sheet 1 - 任務清單（全部任務）
+        Sheet per Assignee - 該負責人的工作日誌
     """
     if project_lookup is None:
         project_lookup = {}
@@ -83,34 +79,37 @@ def export_tasks_to_excel(filepath, tasks, project_name="全部專案",
                       body_font, thin_border, priority_fills, status_fills)
 
     # ══════════════════════════════════════════════════════
-    # Sheet per Assignee: 依負責人分頁
-    # ══════════════════════════════════════════════════════
-    assignee_groups = {}
-    for t in tasks:
-        key = t.assignee if t.assignee else '未指派'
-        assignee_groups.setdefault(key, []).append(t)
-
-    for assignee_name in sorted(assignee_groups.keys()):
-        safe_name = assignee_name[:28].replace('/', '_').replace('\\', '_')
-        safe_name = safe_name.replace('[', '(').replace(']', ')')
-        safe_name = safe_name.replace('*', '').replace('?', '')
-        safe_name = safe_name.replace(':', '-')
-        ws_a = wb.create_sheet(title=safe_name)
-        _write_task_sheet(ws_a, assignee_groups[assignee_name],
-                          f"{project_name} - {assignee_name}",
-                          project_lookup, task_tags_lookup,
-                          header_fill, header_font, body_font,
-                          thin_border, priority_fills, status_fills)
-
-    # ══════════════════════════════════════════════════════
-    # Sheet: 工作日誌
+    # Sheet per Assignee: 依負責人分頁 — 顯示工作日誌
     # ══════════════════════════════════════════════════════
     if db:
-        ws_log = wb.create_sheet(title="工作日誌")
-        _write_worklog_sheet(ws_log, tasks, db, project_name,
-                             header_fill, header_font, body_font, thin_border)
+        # 按負責人收集工作日誌
+        assignee_logs = {}  # {assignee: [(task_title, log), ...]}
+        for task in tasks:
+            logs = db.get_work_logs(task.id)
+            if logs:
+                key = task.assignee if task.assignee else '未指派'
+                if key not in assignee_logs:
+                    assignee_logs[key] = []
+                for log in logs:
+                    assignee_logs[key].append((task.title, task.assignee, log))
+
+        for assignee_name in sorted(assignee_logs.keys()):
+            safe_name = _safe_sheet_name(assignee_name)
+            ws_a = wb.create_sheet(title=safe_name)
+            _write_assignee_worklog_sheet(
+                ws_a, assignee_name, assignee_logs[assignee_name],
+                project_name, header_fill, header_font, body_font,
+                thin_border)
 
     wb.save(filepath)
+
+
+def _safe_sheet_name(name):
+    """處理 Excel 工作表名稱限制"""
+    safe = name[:28]
+    for ch in ['/', '\\', '[', ']', '*', '?', ':']:
+        safe = safe.replace(ch, '_')
+    return safe
 
 
 def _write_task_sheet(ws, tasks, title_text, project_lookup, task_tags_lookup,
@@ -163,15 +162,16 @@ def _write_task_sheet(ws, tasks, title_text, project_lookup, task_tags_lookup,
     ws.freeze_panes = 'A4'
 
 
-def _write_worklog_sheet(ws, tasks, db, project_name,
-                         header_fill, header_font, body_font, thin_border):
-    """寫入工作日誌頁"""
+def _write_assignee_worklog_sheet(ws, assignee_name, log_entries,
+                                   project_name, header_fill, header_font,
+                                   body_font, thin_border):
+    """寫入負責人工作日誌分頁"""
     num_cols = len(WORKLOG_COLUMNS)
 
     ws.merge_cells(start_row=1, start_column=1,
                    end_row=1, end_column=num_cols)
     title_cell = ws.cell(row=1, column=1)
-    title_cell.value = (f"工作日誌 - {project_name}  —  "
+    title_cell.value = (f"工作日誌 - {assignee_name} ({project_name})  —  "
                         f"匯出時間: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     title_cell.font = Font(name=FONT_NAME, size=14, bold=True)
     title_cell.alignment = Alignment(horizontal='left')
@@ -183,26 +183,28 @@ def _write_worklog_sheet(ws, tasks, db, project_name,
         cell.alignment = Alignment(horizontal='center', vertical='center')
         ws.column_dimensions[get_column_letter(col_idx)].width = width
 
+    # 按日期排序
+    sorted_entries = sorted(log_entries, key=lambda x: x[2].log_date,
+                             reverse=True)
+
     row_idx = 4
-    for task in tasks:
-        logs = db.get_work_logs(task.id)
-        for log in logs:
-            data = {
-                'task_title': task.title,
-                'assignee': task.assignee,
-                'log_date': log.log_date,
-                'hours': log.hours,
-                'content': log.content,
-            }
-            for col_idx, (_, field, _) in enumerate(WORKLOG_COLUMNS, 1):
-                value = data.get(field, '')
-                cell = ws.cell(row=row_idx, column=col_idx, value=value)
-                cell.font = body_font
-                cell.alignment = Alignment(
-                    vertical='center',
-                    wrap_text=(field == 'content'))
-                cell.border = thin_border
-            row_idx += 1
+    for task_title, assignee, log in sorted_entries:
+        data = {
+            'task_title': task_title,
+            'assignee': assignee or '',
+            'log_date': log.log_date,
+            'hours': log.hours,
+            'content': log.content,
+        }
+        for col_idx, (_, field, _) in enumerate(WORKLOG_COLUMNS, 1):
+            value = data.get(field, '')
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            cell.font = body_font
+            cell.alignment = Alignment(
+                vertical='center',
+                wrap_text=(field == 'content'))
+            cell.border = thin_border
+        row_idx += 1
 
     if row_idx > 4:
         ws.auto_filter.ref = f"A3:{get_column_letter(num_cols)}{row_idx - 1}"
