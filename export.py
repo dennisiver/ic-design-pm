@@ -30,12 +30,19 @@ WORKLOG_COLUMNS = [
     ('內容',     'content',    50),
 ]
 
+MILESTONE_COLUMNS = [
+    ('專案',     'project_name', 20),
+    ('名稱',     'name',         30),
+    ('目標日期', 'target_date',  14),
+    ('描述',     'description',  40),
+]
+
 FONT_NAME = 'Microsoft JhengHei UI'
 
 
 def export_tasks_to_excel(filepath, tasks, project_name="全部專案",
                           project_lookup=None, task_tags_lookup=None,
-                          db=None):
+                          db=None, milestones=None):
     """匯出任務至 Excel。
 
     結構：
@@ -100,6 +107,16 @@ def export_tasks_to_excel(filepath, tasks, project_name="全部專案",
                 ws_a, assignee_name, assignee_logs[assignee_name],
                 project_name, header_fill, header_font, body_font,
                 thin_border)
+
+    # ══════════════════════════════════════════════════════
+    # Sheet: 里程碑
+    # ══════════════════════════════════════════════════════
+    if milestones:
+        ws_ms = wb.create_sheet(title="里程碑")
+        _write_milestone_sheet(ws_ms, milestones,
+                               project_lookup or {},
+                               header_fill, header_font,
+                               body_font, thin_border)
 
     wb.save(filepath)
 
@@ -208,4 +225,51 @@ def _write_assignee_worklog_sheet(ws, assignee_name, log_entries,
 
     if row_idx > 4:
         ws.auto_filter.ref = f"A3:{get_column_letter(num_cols)}{row_idx - 1}"
+    ws.freeze_panes = 'A4'
+
+
+def _write_milestone_sheet(ws, milestones, project_lookup,
+                            header_fill, header_font, body_font, thin_border):
+    """寫入里程碑分頁，target_date 轉為 Excel 日期格式"""
+    from datetime import date as date_type
+    num_cols = len(MILESTONE_COLUMNS)
+
+    ws.merge_cells(start_row=1, start_column=1,
+                   end_row=1, end_column=num_cols)
+    title_cell = ws.cell(row=1, column=1)
+    title_cell.value = (f"里程碑清單  —  "
+                        f"匯出時間: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    title_cell.font = Font(name=FONT_NAME, size=14, bold=True)
+    title_cell.alignment = Alignment(horizontal='left')
+
+    for col_idx, (header, _, width) in enumerate(MILESTONE_COLUMNS, 1):
+        cell = ws.cell(row=3, column=col_idx, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+    sorted_ms = sorted(milestones, key=lambda m: m.target_date or '')
+    for row_idx, ms in enumerate(sorted_ms, 4):
+        for col_idx, (_, field, _) in enumerate(MILESTONE_COLUMNS, 1):
+            if field == 'project_name':
+                value = project_lookup.get(ms.project_id, '')
+            elif field == 'target_date':
+                try:
+                    value = datetime.strptime(ms.target_date, '%Y-%m-%d').date()
+                except (ValueError, TypeError):
+                    value = ms.target_date or ''
+            else:
+                value = getattr(ms, field, '') or ''
+
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            cell.font = body_font
+            cell.alignment = Alignment(vertical='center',
+                                       wrap_text=(field == 'description'))
+            cell.border = thin_border
+            if field == 'target_date' and isinstance(value, date_type):
+                cell.number_format = 'YYYY-MM-DD'
+
+    if len(sorted_ms) > 0:
+        ws.auto_filter.ref = f"A3:{get_column_letter(num_cols)}{3 + len(sorted_ms)}"
     ws.freeze_panes = 'A4'

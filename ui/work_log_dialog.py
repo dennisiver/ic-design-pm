@@ -209,6 +209,14 @@ class WorkLogDialog:
                          bg='white', fg='#888888',
                          font=(FONT_FAMILY, 8)).pack(side='left')
 
+                # 編輯按鈕
+                edit_btn = tk.Label(top_row, text='✏️', bg='white',
+                                     fg='#1565C0', cursor='hand2',
+                                     font=(FONT_FAMILY, 9))
+                edit_btn.pack(side='right', padx=(4, 0))
+                edit_btn.bind('<Button-1>',
+                              lambda e, l=log: self._edit_log(l))
+
                 # 刪除按鈕
                 del_btn = tk.Label(top_row, text='\u2716', bg='white',
                                     fg='#CC0000', cursor='hand2',
@@ -233,6 +241,9 @@ class WorkLogDialog:
                 content_text.configure(state='disabled')
                 content_text.bind('<Configure>',
                     lambda e, t=content_text: self._auto_height(t))
+
+                # 雙擊整個 entry 開啟編輯
+                self._bind_double_click(entry_frame, log)
 
     def _insert_with_links(self, text_widget, content):
         """插入文字，將檔案路徑和 URL 轉為可點擊連結"""
@@ -294,6 +305,28 @@ class WorkLogDialog:
     def _add_log(self):
         _AddLogDialog(self.win, self.db, self.task_id,
                       on_save=self._refresh)
+
+    # ─── 編輯日誌 ──────────────────────────────────────────
+
+    def _bind_double_click(self, frame, log):
+        """為 frame 及所有子元件綁定雙擊事件"""
+        def on_dbl(e):
+            self._edit_log(log)
+        frame.bind('<Double-Button-1>', on_dbl)
+        for child in frame.winfo_children():
+            try:
+                child.bind('<Double-Button-1>', on_dbl)
+            except Exception:
+                pass
+            # 遞迴子層
+            for sub in child.winfo_children():
+                try:
+                    sub.bind('<Double-Button-1>', on_dbl)
+                except Exception:
+                    pass
+
+    def _edit_log(self, log):
+        _EditLogDialog(self.win, self.db, log, on_save=self._refresh)
 
     # ─── 刪除日誌 ──────────────────────────────────────────
 
@@ -361,6 +394,71 @@ class _AddLogDialog:
             return
         content = self.content_text.get('1.0', 'end-1c').strip()
         self.db.create_work_log(self.task_id, d, content, hours)
+        if self.on_save:
+            self.on_save()
+        self.win.destroy()
+
+
+class _EditLogDialog:
+    """編輯既有工作日誌"""
+    def __init__(self, parent, db, log, on_save=None):
+        self.db = db
+        self.log = log
+        self.on_save = on_save
+
+        self.win = tk.Toplevel(parent)
+        self.win.title("編輯工作日誌")
+        self.win.geometry("500x420")
+        self.win.resizable(True, True)
+        self.win.transient(parent)
+        self.win.grab_set()
+
+        f = ttk.Frame(self.win, padding=16)
+        f.pack(fill='both', expand=True)
+
+        # 日期
+        ttk.Label(f, text="日期:", font=FONT_BODY_BOLD).pack(anchor='w')
+        self.date_var = tk.StringVar(value=log.log_date)
+        from ui.date_picker import DateEntry
+        de = DateEntry(f, textvariable=self.date_var)
+        de.pack(fill='x', pady=(0, 8))
+
+        # 工時（天）
+        ttk.Label(f, text="工時 (天):", font=FONT_BODY_BOLD).pack(anchor='w')
+        self.hours_var = tk.StringVar(value=f"{log.hours:.1f}")
+        ttk.Entry(f, textvariable=self.hours_var, font=FONT_BODY).pack(
+            fill='x', pady=(0, 8))
+
+        # 內容
+        ttk.Label(f, text="內容 (支援檔案路徑連結，如 C:\\path\\file.doc):",
+                  font=FONT_BODY_BOLD).pack(anchor='w')
+        self.content_text = tk.Text(f, height=10, font=FONT_BODY, wrap='word')
+        self.content_text.pack(fill='both', expand=True, pady=(0, 10))
+        if log.content:
+            self.content_text.insert('1.0', log.content)
+
+        bf = ttk.Frame(f)
+        bf.pack(fill='x')
+        ttk.Button(bf, text="取消", command=self.win.destroy,
+                   style='Toolbar.TButton').pack(side='right', padx=(8, 0))
+        ttk.Button(bf, text="儲存", command=self._save,
+                   style='Accent.TButton').pack(side='right')
+
+        self.win.wait_window()
+
+    def _save(self):
+        d = self.date_var.get().strip()
+        if not re.match(r'^\d{4}-\d{2}-\d{2}$', d):
+            messagebox.showwarning("格式錯誤", "日期格式應為 YYYY-MM-DD",
+                                    parent=self.win)
+            return
+        try:
+            hours = float(self.hours_var.get().strip())
+        except ValueError:
+            messagebox.showwarning("格式錯誤", "工時必須為數字", parent=self.win)
+            return
+        content = self.content_text.get('1.0', 'end-1c').strip()
+        self.db.update_work_log(self.log.id, d, content, hours)
         if self.on_save:
             self.on_save()
         self.win.destroy()

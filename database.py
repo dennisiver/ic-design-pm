@@ -127,6 +127,7 @@ class DatabaseManager:
 
         migrations = [
             self._migrate_v1_to_v2,
+            self._migrate_v2_add_milestone_sort,
         ]
         for i, fn in enumerate(migrations, start=1):
             if current < i:
@@ -142,6 +143,13 @@ class DatabaseManager:
                 self.conn.execute(f"ALTER TABLE tasks ADD COLUMN {col}")
             except sqlite3.OperationalError:
                 pass
+
+    def _migrate_v2_add_milestone_sort(self):
+        try:
+            self.conn.execute(
+                "ALTER TABLE milestones ADD COLUMN sort_order INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
 
     def _seed_default_project(self):
         count = self.conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0]
@@ -325,6 +333,12 @@ class DatabaseManager:
         self.conn.commit()
         return cur.lastrowid
 
+    def update_work_log(self, log_id, log_date, content, hours):
+        self.conn.execute(
+            "UPDATE work_logs SET log_date=?, content=?, hours=? WHERE id=?",
+            (log_date, content, hours, log_id))
+        self.conn.commit()
+
     def delete_work_log(self, log_id):
         self.conn.execute("DELETE FROM work_logs WHERE id=?", (log_id,))
         self.conn.commit()
@@ -356,6 +370,19 @@ class DatabaseManager:
 
     def delete_milestone(self, mid):
         self.conn.execute("DELETE FROM milestones WHERE id=?", (mid,))
+        self.conn.commit()
+
+    def update_gantt_order(self, task_orders, milestone_orders):
+        """批次更新甘特圖排序。
+        task_orders: [(task_id, sort_order), ...]
+        milestone_orders: [(milestone_id, sort_order), ...]
+        """
+        for tid, order in task_orders:
+            self.conn.execute(
+                "UPDATE tasks SET sort_order=? WHERE id=?", (order, tid))
+        for mid, order in milestone_orders:
+            self.conn.execute(
+                "UPDATE milestones SET sort_order=? WHERE id=?", (order, mid))
         self.conn.commit()
 
     # ─── Dashboard Stats ────────────────────────────────────

@@ -36,6 +36,7 @@ CATEGORY_BADGE_COLORS = {
     'DFT':                   ('#065F46', '#D1FAE5'),
     '時序分析(STA)':         ('#9A3412', '#FFEDD5'),
     '實體驗證(Physical Verification)': ('#5B21B6', '#EDE9FE'),
+    'FPGA驗證':              ('#0369A1', '#E0F2FE'),
     '其他':                  ('#555555', '#F0F0F0'),
 }
 
@@ -54,6 +55,7 @@ DEFAULT_CATEGORIES = [
     'DFT',
     '時序分析(STA)',
     '實體驗證(Physical Verification)',
+    'FPGA驗證',
     '其他',
 ]
 

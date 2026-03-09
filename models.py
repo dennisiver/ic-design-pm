@@ -52,4 +52,5 @@ class Milestone:
     name: str = ""
     target_date: str = ""
     description: str = ""
+    sort_order: int = 0
     created_at: str = ""

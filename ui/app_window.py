@@ -87,8 +87,18 @@ class AppWindow:
         pri_combo = ttk.Combobox(toolbar, textvariable=self.pri_filter_var,
                                  values=['全部'] + PRIORITIES,
                                  state='readonly', width=8, font=FONT_BODY)
-        pri_combo.pack(side='left', padx=(4, 0))
+        pri_combo.pack(side='left', padx=(4, 12))
         pri_combo.bind('<<ComboboxSelected>>', lambda e: self._apply_filters())
+
+        # 負責人篩選（動態）
+        ttk.Label(toolbar, text="負責人:", font=FONT_BODY).pack(side='left')
+        self.assignee_filter_var = tk.StringVar(value='全部')
+        self.assignee_combo = ttk.Combobox(toolbar,
+                                            textvariable=self.assignee_filter_var,
+                                            state='readonly', width=10,
+                                            font=FONT_BODY)
+        self.assignee_combo.pack(side='left', padx=(4, 0))
+        self.assignee_combo.bind('<<ComboboxSelected>>', lambda e: self._apply_filters())
 
     # ─── 分頁列 ───────────────────────────────────────────
 
@@ -153,7 +163,8 @@ class AppWindow:
         # 甘特圖視圖
         self.gantt_view = GanttView(
             self.content_frame,
-            on_task_click=self._on_task_click
+            on_task_click=self._on_task_click,
+            db=self.db
         )
 
         # 儀表板視圖
@@ -191,8 +202,9 @@ class AppWindow:
     # ─── 中央刷新 ───────────────────────────────────────────
 
     def refresh_all(self):
-        # 更新類別篩選下拉
+        # 更新篩選下拉
         self._update_category_filter()
+        self._update_assignee_filter()
 
         tasks = self.db.get_tasks(
             project_id=self.current_project_id,
@@ -236,6 +248,11 @@ class AppWindow:
         db_cats = self.db.get_unique_categories()
         all_cats = sorted(set(DEFAULT_CATEGORIES + db_cats))
         self.cat_combo.configure(values=['全部'] + all_cats)
+
+    def _update_assignee_filter(self):
+        """動態更新負責人篩選下拉清單"""
+        assignees = self.db.get_unique_assignees()
+        self.assignee_combo.configure(values=['全部'] + assignees)
 
     # ─── 回呼函式 ───────────────────────────────────────────
 
@@ -281,10 +298,12 @@ class AppWindow:
         search = self.search_var.get().strip()
         cat = self.cat_filter_var.get()
         pri = self.pri_filter_var.get()
+        assignee = self.assignee_filter_var.get()
 
         self.filter_state['search'] = search
         self.filter_state['category'] = None if cat == '全部' else cat
         self.filter_state['priority'] = None if pri == '全部' else pri
+        self.filter_state['assignee'] = None if assignee == '全部' else assignee
         self.refresh_all()
 
     # ─── 視圖切換 ───────────────────────────────────────────
@@ -331,12 +350,16 @@ class AppWindow:
         project_lookup = {p.id: p.name for p in projects}
         task_tags = self.db.get_task_tags_bulk()
 
+        # 里程碑（依目前選擇的專案篩選）
+        milestones = self.db.get_milestones(self.current_project_id)
+
         try:
             from export import export_tasks_to_excel
             export_tasks_to_excel(filepath, tasks, project_name,
                                   project_lookup=project_lookup,
                                   task_tags_lookup=task_tags,
-                                  db=self.db)
+                                  db=self.db,
+                                  milestones=milestones)
             messagebox.showinfo("匯出成功",
                                 f"已匯出 {len(tasks)} 項任務至:\n{filepath}",
                                 parent=self.root)

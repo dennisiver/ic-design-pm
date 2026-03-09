@@ -5,6 +5,7 @@ import tkinter.ttk as ttk
 from datetime import datetime, timedelta, date
 from constants import (CHART_COLORS, FONT_FAMILY, FONT_BODY, FONT_BODY_BOLD,
                        STATUS_COLORS, PRIORITY_COLORS)
+from models import Milestone
 
 ROW_HEIGHT = 34
 WEEK_WIDTH = 42
@@ -50,14 +51,21 @@ class _CanvasTooltip:
 
 
 class GanttView(ttk.Frame):
-    def __init__(self, parent, on_task_click=None):
+    def __init__(self, parent, on_task_click=None, db=None):
         super().__init__(parent)
         self.on_task_click = on_task_click
+        self.db = db
         self.tasks = []
         self.milestones = []
         self.rows = []
+        self.row_groups = []  # 每列所屬群組索引
         self.group_by = 'project'
         self.project_lookup = {}
+
+        # 拖曳狀態
+        self._drag_row = None       # 正在拖的列索引
+        self._drag_target = None    # 放下的目標位置
+        self._drag_line = None      # 視覺提示線
 
         self._build_ui()
         self.tooltip = _CanvasTooltip(self.timeline_canvas)
@@ -115,6 +123,11 @@ class GanttView(ttk.Frame):
                 '<MouseWheel>', self._on_mousewheel))
             c.bind('<Leave>', lambda e, cv=c: cv.unbind_all('<MouseWheel>'))
 
+        # 拖曳排序綁定（左側標籤區）
+        self.label_canvas.bind('<ButtonPress-1>', self._drag_start)
+        self.label_canvas.bind('<B1-Motion>', self._drag_motion)
+        self.label_canvas.bind('<ButtonRelease-1>', self._drag_end)
+
     def _yview_both(self, *args):
         self.label_canvas.yview(*args)
         self.timeline_canvas.yview(*args)
@@ -138,6 +151,7 @@ class GanttView(ttk.Frame):
 
     def _compute_rows(self):
         self.rows = []
+        self.row_groups = []  # 每列所屬群組索引（-1 = 群組標頭）
         valid = [t for t in self.tasks
                  if t.start_date and t.estimated_weeks]
 
@@ -146,20 +160,55 @@ class GanttView(ttk.Frame):
             for t in valid:
                 key = self.project_lookup.get(t.project_id, f'專案{t.project_id}')
                 groups.setdefault(key, []).append(t)
+            ms_groups = {}
+            for ms in self.milestones:
+                key = self.project_lookup.get(ms.project_id, f'專案{ms.project_id}')
+                ms_groups.setdefault(key, []).append(ms)
         else:
             groups = {}
             for t in valid:
                 key = t.assignee or '未指派'
                 groups.setdefault(key, []).append(t)
+            ms_groups = {}
+
+        all_group_names = sorted(set(list(groups.keys()) + list(ms_groups.keys())))
 
         color_idx = 0
-        for group_name in sorted(groups.keys()):
+        group_idx = 0
+        for group_name in all_group_names:
             self.rows.append((f"\u25B8 {group_name}", None, '#E8E8E8'))
+            self.row_groups.append(-1)  # 群組標頭
             color = CHART_COLORS[color_idx % len(CHART_COLORS)]
-            for t in sorted(groups[group_name],
-                            key=lambda x: x.start_date or ''):
-                self.rows.append((t.title, t, color))
+
+            # 合併任務和里程碑，按 sort_order 排序
+            items = []
+            for t in groups.get(group_name, []):
+                items.append(('task', t, t.sort_order, t.start_date or ''))
+            for ms in ms_groups.get(group_name, []):
+                items.append(('ms', ms, ms.sort_order, ms.target_date or ''))
+            # 按 sort_order 排序，相同 sort_order 按日期
+            items.sort(key=lambda x: (x[2], x[3]))
+
+            for item_type, item, _, _ in items:
+                if item_type == 'task':
+                    self.rows.append((item.title, item, color))
+                else:
+                    self.rows.append((item.name, item, '#E15759'))
+                self.row_groups.append(group_idx)
+
             color_idx += 1
+            group_idx += 1
+
+        # 不在 project 分組模式下，里程碑獨立一組
+        if self.group_by != 'project' and self.milestones:
+            self.rows.append(('\u25B8 里程碑', None, '#E8E8E8'))
+            self.row_groups.append(-1)
+            for ms in sorted(self.milestones,
+                             key=lambda m: (m.sort_order, m.target_date or '')):
+                proj_name = self.project_lookup.get(ms.project_id, '')
+                display = f"[{proj_name}] {ms.name}" if proj_name else ms.name
+                self.rows.append((display, ms, '#E15759'))
+                self.row_groups.append(group_idx)
 
     def _get_date_range(self):
         dates = []
@@ -247,10 +296,18 @@ class GanttView(ttk.Frame):
             0, HEADER_HEIGHT, LABEL_WIDTH, HEADER_HEIGHT, fill='#D0D0D0')
 
         # ── 繪製列 ──
-        for i, (label, task, color) in enumerate(self.rows):
+        for i, (label, data, color) in enumerate(self.rows):
             y = HEADER_HEIGHT + i * ROW_HEIGHT
-            is_group = task is None
-            bg = '#F0F0F0' if is_group else ('#FAFAFA' if i % 2 == 0 else '#FFFFFF')
+            is_group = data is None
+            is_milestone = isinstance(data, Milestone)
+            is_task = not is_group and not is_milestone
+
+            if is_group:
+                bg = '#F0F0F0'
+            elif is_milestone:
+                bg = '#FFF5F5' if i % 2 == 0 else '#FFF0F0'
+            else:
+                bg = '#FAFAFA' if i % 2 == 0 else '#FFFFFF'
 
             self.label_canvas.create_rectangle(
                 0, y, LABEL_WIDTH, y + ROW_HEIGHT, fill=bg, outline='')
@@ -270,7 +327,67 @@ class GanttView(ttk.Frame):
                 self.label_canvas.create_text(
                     10, y + ROW_HEIGHT // 2, text=label, anchor='w',
                     font=(FONT_FAMILY, 10, 'bold'), fill='#333333')
+
+            elif is_milestone:
+                ms = data
+                # 左側：菱形圖示 + 名稱
+                cy = y + ROW_HEIGHT // 2
+                self.label_canvas.create_polygon(
+                    10, cy - 6, 16, cy, 10, cy + 6, 4, cy,
+                    fill='#2E7D32', outline='#1B5E20', width=1)
+                display = label[:18] + '..' if len(label) > 19 else label
+                self.label_canvas.create_text(
+                    22, cy, text=display, anchor='w',
+                    font=(FONT_FAMILY, 9, 'bold'), fill='#2E7D32')
+
+                # 右側時間軸：菱形 + 虛線
+                try:
+                    md = datetime.strptime(ms.target_date, '%Y-%m-%d').date()
+                    mx = self._date_to_x(md, min_date)
+
+                    # 垂直虛線
+                    self.timeline_canvas.create_line(
+                        mx, HEADER_HEIGHT, mx, canvas_h,
+                        fill='#4CAF50', width=1, dash=(4, 4))
+
+                    # 菱形（較大，在該列中央）
+                    ms_size = 10
+                    diamond = self.timeline_canvas.create_polygon(
+                        mx, cy - ms_size,
+                        mx + ms_size, cy,
+                        mx, cy + ms_size,
+                        mx - ms_size, cy,
+                        fill='#2E7D32', outline='#1B5E20', width=1)
+
+                    # 日期標籤放在菱形右側
+                    date_label = self.timeline_canvas.create_text(
+                        mx + ms_size + 4, cy,
+                        text=ms.target_date, anchor='w',
+                        font=(FONT_FAMILY, 8), fill='#2E7D32')
+
+                    # Tooltip
+                    proj_name = self.project_lookup.get(ms.project_id, '')
+                    days_diff = (md - today).days
+                    if days_diff > 0:
+                        days_str = f"還剩 {days_diff} 天"
+                    elif days_diff == 0:
+                        days_str = "就是今天！"
+                    else:
+                        days_str = f"已過 {abs(days_diff)} 天"
+
+                    tip_text = f"\u25C6 {ms.name}\n日期: {ms.target_date}  ({days_str})"
+                    if proj_name:
+                        tip_text += f"\n專案: {proj_name}"
+                    if ms.description:
+                        tip_text += f"\n{ms.description}"
+
+                    self._bind_milestone_tooltip(diamond, tip_text)
+                    self._bind_milestone_tooltip(date_label, tip_text)
+                except ValueError:
+                    pass
+
             else:
+                task = data
                 # 任務名稱（左側有狀態小色點）
                 status_color = STATUS_COLORS.get(task.status, '#999999')
                 self.label_canvas.create_oval(
@@ -283,118 +400,64 @@ class GanttView(ttk.Frame):
                     24, y + ROW_HEIGHT // 2, text=display, anchor='w',
                     font=(FONT_FAMILY, 9), fill='#333333')
 
-            if task and task.start_date and task.estimated_weeks:
-                try:
-                    sd = datetime.strptime(task.start_date, '%Y-%m-%d').date()
-                    ed = sd + timedelta(weeks=task.estimated_weeks)
-                    x1 = self._date_to_x(sd, min_date)
-                    x2 = self._date_to_x(ed, min_date)
+                # 繪製任務條
+                if task.start_date and task.estimated_weeks:
+                    try:
+                        sd = datetime.strptime(task.start_date, '%Y-%m-%d').date()
+                        ed = sd + timedelta(weeks=task.estimated_weeks)
+                        x1 = self._date_to_x(sd, min_date)
+                        x2 = self._date_to_x(ed, min_date)
 
-                    bar_color = BAR_COLORS.get(task.status, color)
+                        bar_color = BAR_COLORS.get(task.status, color)
 
-                    # 圓角矩形效果（用兩個矩形+圓圈模擬）
-                    bar_y1 = y + 7
-                    bar_y2 = y + ROW_HEIGHT - 7
-                    bar_x2 = max(x1 + 8, x2)
+                        bar_y1 = y + 7
+                        bar_y2 = y + ROW_HEIGHT - 7
+                        bar_x2 = max(x1 + 8, x2)
 
-                    bar_id = self.timeline_canvas.create_rectangle(
-                        x1, bar_y1, bar_x2, bar_y2,
-                        fill=bar_color, outline='', width=0)
+                        bar_id = self.timeline_canvas.create_rectangle(
+                            x1, bar_y1, bar_x2, bar_y2,
+                            fill=bar_color, outline='', width=0)
 
-                    # 任務名稱顯示在條右側（OpenProject 風格）
-                    bar_w = bar_x2 - x1
-                    name_text = task.title
-                    if bar_w > 60:
-                        # 條夠寬：名稱放在條內
-                        max_chars = bar_w // 8
-                        disp = name_text[:max_chars]
-                        if len(name_text) > max_chars:
-                            disp = disp[:-2] + '..'
-                        name_id = self.timeline_canvas.create_text(
-                            x1 + 6, (bar_y1 + bar_y2) // 2,
-                            text=disp, anchor='w',
-                            font=(FONT_FAMILY, 8, 'bold'), fill='white')
-                        self._bind_bar_events(name_id, task.id,
+                        # 任務名稱顯示在條上（OpenProject 風格）
+                        bar_w = bar_x2 - x1
+                        name_text = task.title
+                        if bar_w > 60:
+                            max_chars = bar_w // 8
+                            disp = name_text[:max_chars]
+                            if len(name_text) > max_chars:
+                                disp = disp[:-2] + '..'
+                            name_id = self.timeline_canvas.create_text(
+                                x1 + 6, (bar_y1 + bar_y2) // 2,
+                                text=disp, anchor='w',
+                                font=(FONT_FAMILY, 8, 'bold'), fill='white')
+                            self._bind_bar_events(name_id, task.id,
+                                                  self._bar_tip(task, ed))
+                        else:
+                            disp = name_text[:16]
+                            if len(name_text) > 16:
+                                disp = disp[:-2] + '..'
+                            self.timeline_canvas.create_text(
+                                bar_x2 + 4, (bar_y1 + bar_y2) // 2,
+                                text=disp, anchor='w',
+                                font=(FONT_FAMILY, 8), fill='#555555')
+
+                        self._bind_bar_events(bar_id, task.id,
                                               self._bar_tip(task, ed))
-                    else:
-                        # 條太窄：名稱放在條右側
-                        disp = name_text[:16]
-                        if len(name_text) > 16:
-                            disp = disp[:-2] + '..'
-                        self.timeline_canvas.create_text(
-                            bar_x2 + 4, (bar_y1 + bar_y2) // 2,
-                            text=disp, anchor='w',
-                            font=(FONT_FAMILY, 8), fill='#555555')
-
-                    self._bind_bar_events(bar_id, task.id,
-                                          self._bar_tip(task, ed))
-                except ValueError:
-                    pass
-
-        # ── 里程碑（顯示所有專案）──
-        ms_y_offset = 0  # 避免多個 milestone 重疊
-        for ms in self.milestones:
-            try:
-                md = datetime.strptime(ms.target_date, '%Y-%m-%d').date()
-                mx = self._date_to_x(md, min_date)
-
-                # 虛線（整個高度）
-                self.timeline_canvas.create_line(
-                    mx, HEADER_HEIGHT, mx, canvas_h,
-                    fill='#E15759', width=1, dash=(4, 4))
-
-                # 菱形圖示
-                my_top = HEADER_HEIGHT + 2 + ms_y_offset
-                diamond = self.timeline_canvas.create_polygon(
-                    mx, my_top,
-                    mx + MILESTONE_SIZE, my_top + MILESTONE_SIZE,
-                    mx, my_top + MILESTONE_SIZE * 2,
-                    mx - MILESTONE_SIZE, my_top + MILESTONE_SIZE,
-                    fill='#E15759', outline='#C0392B', width=1)
-
-                # 名稱標籤（含專案名稱）
-                proj_name = self.project_lookup.get(ms.project_id, '')
-                display_name = f"{ms.name}"
-                if proj_name:
-                    display_name = f"[{proj_name}] {ms.name}"
-                name_id = self.timeline_canvas.create_text(
-                    mx + MILESTONE_SIZE + 4, my_top + MILESTONE_SIZE,
-                    text=display_name, anchor='w',
-                    font=(FONT_FAMILY, 8, 'bold'), fill='#C0392B')
-
-                # 計算距今天數
-                days_diff = (md - today).days
-                if days_diff > 0:
-                    days_str = f"還剩 {days_diff} 天"
-                elif days_diff == 0:
-                    days_str = "就是今天！"
-                else:
-                    days_str = f"已過 {abs(days_diff)} 天"
-
-                tip_text = (f"\u25C6 {ms.name}\n"
-                            f"日期: {ms.target_date}  ({days_str})")
-                if proj_name:
-                    tip_text += f"\n專案: {proj_name}"
-                if ms.description:
-                    tip_text += f"\n{ms.description}"
-
-                self._bind_milestone_tooltip(diamond, tip_text)
-                self._bind_milestone_tooltip(name_id, tip_text)
-                ms_y_offset += 18  # 下一個 milestone 稍微下移
-            except ValueError:
-                pass
+                    except ValueError:
+                        pass
 
         # ── 今天紅線 ──
         today_x = self._date_to_x(today, min_date)
+        # 垂直紅線（從標頭底部到最下方）
         self.timeline_canvas.create_line(
-            today_x, 0, today_x, canvas_h,
+            today_x, HEADER_HEIGHT, today_x, canvas_h,
             fill='#DC3545', width=2, dash=(6, 3))
-        # 「Today」標記
+        # 「Today」標記（放在週日期列區域）
         self.timeline_canvas.create_rectangle(
-            today_x - 22, 2, today_x + 22, 18,
+            today_x - 22, 24, today_x + 22, 40,
             fill='#DC3545', outline='')
         self.timeline_canvas.create_text(
-            today_x, 10, text='Today',
+            today_x, 32, text='Today',
             font=(FONT_FAMILY, 7, 'bold'), fill='white')
 
     def _bar_tip(self, task, end_date):
@@ -435,6 +498,156 @@ class GanttView(ttk.Frame):
 
         self.timeline_canvas.tag_bind(item_id, '<Enter>', _enter)
         self.timeline_canvas.tag_bind(item_id, '<Leave>', _leave)
+
+    # ─── 拖曳排序 ──────────────────────────────────────────
+
+    def _get_group_range(self, group_idx):
+        """取得群組內第一個和最後一個項目的列索引"""
+        first = last = -1
+        for i, g in enumerate(self.row_groups):
+            if g == group_idx:
+                if first == -1:
+                    first = i
+                last = i
+        return first, last
+
+    def _calc_insert_pos(self, canvas_y):
+        """根據 canvas y 座標計算插入位置（列索引）和指示線 y 座標。
+        回傳 (insert_before_index, line_y) 或 (None, None)。
+        insert_before_index 表示「插入在此索引之前」。
+        """
+        if self._drag_row is None or not self.rows:
+            return None, None
+
+        src_group = self.row_groups[self._drag_row]
+        first, last = self._get_group_range(src_group)
+        if first == -1:
+            return None, None
+
+        # 算出游標最接近哪個間隔線
+        # 群組內有效的插入間隔：first 的上方 到 last 的下方
+        best_pos = None
+        best_line_y = None
+        best_dist = float('inf')
+
+        for pos in range(first, last + 2):  # +2 因為含「last 之後」
+            line_y = HEADER_HEIGHT + pos * ROW_HEIGHT
+            dist = abs(canvas_y - line_y)
+            if dist < best_dist:
+                best_dist = dist
+                best_pos = pos
+                best_line_y = line_y
+
+        return best_pos, best_line_y
+
+    def _drag_start(self, event):
+        """開始拖曳"""
+        cy = self.label_canvas.canvasy(event.y)
+        if cy < HEADER_HEIGHT:
+            return
+        row = int((cy - HEADER_HEIGHT) / ROW_HEIGHT)
+        if row < 0 or row >= len(self.rows):
+            return
+        # 只能拖非群組標頭的列
+        if self.row_groups[row] == -1:
+            return
+        self._drag_row = row
+        self._drag_insert = None
+        self.label_canvas.configure(cursor='fleur')
+
+    def _drag_motion(self, event):
+        """拖曳中 — 顯示目標位置指示線"""
+        if self._drag_row is None:
+            return
+        cy = self.label_canvas.canvasy(event.y)
+
+        insert_pos, line_y = self._calc_insert_pos(cy)
+        if insert_pos is None:
+            return
+
+        self._drag_insert = insert_pos
+
+        # 繪製指示線（左側 + 右側同步）
+        if self._drag_line:
+            self.label_canvas.delete(self._drag_line)
+            self.timeline_canvas.delete('drag_line')
+        self._drag_line = self.label_canvas.create_line(
+            0, line_y, LABEL_WIDTH, line_y,
+            fill='#1565C0', width=3)
+        self.timeline_canvas.create_line(
+            0, line_y, 200, line_y,
+            fill='#1565C0', width=3, tags='drag_line')
+
+    def _drag_end(self, event):
+        """放下 — 重新排序並儲存"""
+        self.label_canvas.configure(cursor='')
+        if self._drag_line:
+            self.label_canvas.delete(self._drag_line)
+            self._drag_line = None
+        self.timeline_canvas.delete('drag_line')
+
+        if self._drag_row is None:
+            return
+
+        src = self._drag_row
+        src_group = self.row_groups[src]
+
+        # 先計算插入點（_drag_row 還沒清掉，_calc_insert_pos 需要它）
+        cy = self.label_canvas.canvasy(event.y)
+        insert_pos, _ = self._calc_insert_pos(cy)
+
+        # 也參考 motion 階段記錄的位置
+        if insert_pos is None and self._drag_insert is not None:
+            insert_pos = self._drag_insert
+
+        # 清除拖曳狀態
+        self._drag_row = None
+        self._drag_insert = None
+
+        if insert_pos is None:
+            return
+
+        # 跳過不需要移動的情況（插入在自己的前面或後面等於沒動）
+        if insert_pos == src or insert_pos == src + 1:
+            return
+
+        # 取出要移動的列
+        moving_row = self.rows[src]
+        moving_grp = self.row_groups[src]
+
+        # 先移除
+        self.rows.pop(src)
+        self.row_groups.pop(src)
+
+        # 計算移除後的插入索引
+        actual_pos = insert_pos if insert_pos < src else insert_pos - 1
+        actual_pos = max(0, min(actual_pos, len(self.rows)))
+
+        self.rows.insert(actual_pos, moving_row)
+        self.row_groups.insert(actual_pos, moving_grp)
+
+        # 更新 sort_order 並儲存到 DB
+        self._save_group_order(src_group)
+        self._draw()
+
+    def _save_group_order(self, group_idx):
+        """將群組內的排序存回資料庫"""
+        if not self.db:
+            return
+        task_orders = []
+        ms_orders = []
+        order = 0
+        for i, (_, data, _) in enumerate(self.rows):
+            if self.row_groups[i] != group_idx:
+                continue
+            if isinstance(data, Milestone):
+                ms_orders.append((data.id, order))
+                data.sort_order = order
+            elif data is not None:
+                task_orders.append((data.id, order))
+                data.sort_order = order
+            order += 1
+        self.db.update_gantt_order(task_orders, ms_orders)
 
     def _scroll_to_today(self):
         min_date, max_date = self._get_date_range()

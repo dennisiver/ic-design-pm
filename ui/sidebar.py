@@ -68,10 +68,12 @@ class ProjectSidebar(ttk.Frame):
         project_id = int(item.replace('proj_', ''))
 
         menu = tk.Menu(self, tearoff=0)
-        menu.add_command(label="重新命名",
+        menu.add_command(label="📌 管理里程碑",
+                         command=lambda: self._manage_milestones(project_id))
+        menu.add_command(label="✏️ 重新命名",
                          command=lambda: self._rename_project(project_id))
         menu.add_separator()
-        menu.add_command(label="刪除專案",
+        menu.add_command(label="🗑️ 刪除專案",
                          command=lambda: self._delete_project(project_id))
         menu.tk_popup(event.x_root, event.y_root)
 
@@ -90,6 +92,14 @@ class ProjectSidebar(ttk.Frame):
             if dialog.result:
                 self.refresh()
                 self.on_refresh()
+
+    def _manage_milestones(self, project_id):
+        project = self.db.get_project_by_id(project_id)
+        if project:
+            from ui.milestone_dialog import MilestoneDialog
+            MilestoneDialog(self.winfo_toplevel(), self.db,
+                            project_id, project.name)
+            self.on_refresh()
 
     def _delete_project(self, project_id):
         project = self.db.get_project_by_id(project_id)
